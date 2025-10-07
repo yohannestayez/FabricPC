@@ -41,13 +41,13 @@ def tanh_deriv(x: jnp.ndarray) -> jnp.ndarray:
     return 1 - t**2
 
 
-def linear(x: jnp.ndarray) -> jnp.ndarray:
-    """Linear activation: identity function"""
+def identity(x: jnp.ndarray) -> jnp.ndarray:
+    """Identity activation: f(x) = x"""
     return x
 
 
-def linear_deriv(x: jnp.ndarray) -> jnp.ndarray:
-    """Derivative of linear: always 1"""
+def identity_deriv(x: jnp.ndarray) -> jnp.ndarray:
+    """Derivative of identity: always 1"""
     return jnp.ones_like(x)
 
 
@@ -61,13 +61,25 @@ def leaky_relu_deriv(x: jnp.ndarray, alpha: float = 0.01) -> jnp.ndarray:
     return jnp.where(x > 0, 1.0, alpha)
 
 
+def hard_tanh(x: jnp.ndarray, min_val: float = -1.0, max_val: float = 1.0) -> jnp.ndarray:
+    """Hard tanh: clip(x, min_val, max_val)"""
+    return jnp.clip(x, min_val, max_val)
+
+
+def hard_tanh_deriv(x: jnp.ndarray, min_val: float = -1.0, max_val: float = 1.0) -> jnp.ndarray:
+    """Derivative of hard tanh: 1 if min_val < x < max_val, else 0"""
+    return ((x > min_val) & (x < max_val)).astype(jnp.float32)
+
+
 # Activation function registry
+# Matches PyTorch activation names: identity, sigmoid, tanh, relu, leaky_relu, hard_tanh
 ACTIVATIONS: Dict[str, Tuple[Callable, Callable]] = {
+    "identity": (identity, identity_deriv),
     "sigmoid": (sigmoid, sigmoid_deriv),
-    "relu": (relu, relu_deriv),
     "tanh": (tanh, tanh_deriv),
-    "linear": (linear, linear_deriv),
+    "relu": (relu, relu_deriv),
     "leaky_relu": (leaky_relu, leaky_relu_deriv),
+    "hard_tanh": (hard_tanh, hard_tanh_deriv),
 }
 
 
@@ -76,7 +88,10 @@ def get_activation(config: Dict[str, Any]) -> Tuple[Callable, Callable]:
     Get activation function and its derivative from config.
 
     Args:
-        config: Dictionary with at least {"type": "sigmoid"} or similar
+        config: Dictionary with 'type' key and optional parameters.
+                Supported types: 'identity', 'sigmoid', 'tanh', 'relu', 'leaky_relu', 'hard_tanh'
+                - leaky_relu: requires 'alpha' parameter (default 0.01)
+                - hard_tanh: requires 'min_val' and 'max_val' parameters (default -1 and 1)
 
     Returns:
         Tuple of (activation_fn, derivative_fn)
@@ -88,15 +103,29 @@ def get_activation(config: Dict[str, Any]) -> Tuple[Callable, Callable]:
         >>> act_fn(x)
         DeviceArray([0.5, 0.731, 0.269], dtype=float32)
     """
-    act_type = config.get("type", "sigmoid").lower()
+    if "type" not in config:
+        raise ValueError("config['type'] is required")
+
+    act_type = config["type"].lower()
 
     if act_type not in ACTIVATIONS:
         raise ValueError(
             f"Unknown activation type: '{act_type}'. "
-            f"Available: {list(ACTIVATIONS.keys())}"
+            f"Supported: {list(ACTIVATIONS.keys())}"
         )
 
-    return ACTIVATIONS[act_type]
+    base_fn, base_deriv = ACTIVATIONS[act_type]
+
+    # Handle parameterized activations
+    if act_type == "leaky_relu":
+        alpha = config.get("alpha", 0.01)
+        return (lambda x: base_fn(x, alpha), lambda x: base_deriv(x, alpha))
+    elif act_type == "hard_tanh":
+        min_val = config.get("min_val", -1.0)
+        max_val = config.get("max_val", 1.0)
+        return (lambda x: base_fn(x, min_val, max_val), lambda x: base_deriv(x, min_val, max_val))
+    else:
+        return (base_fn, base_deriv)
 
 
 def get_activation_fn(config: Dict[str, Any]) -> Callable:

@@ -33,18 +33,18 @@ key = jax.random.PRNGKey(42)
 config = {
     # Deeper 3-hidden-layer network
     "node_list": [
-        {"name": "pixels", "dim": 784, "activation": {"type": "linear"}},
-        {"name": "h1",     "dim": 256, "activation": {"type": "relu"}},
-        {"name": "h2",     "dim": 128, "activation": {"type": "relu"}},
-        {"name": "h3",     "dim": 64,  "activation": {"type": "relu"}},
-        {"name": "class",  "dim": 10,  "activation": {"type": "linear"}},
+        {"name": "pixels", "dim": 784, "activation": {"type": "identity"}, "type": "linear"},
+        {"name": "h1",     "dim": 256, "activation": {"type": "relu"}, "type": "linear"},
+        {"name": "h2",     "dim": 128, "activation": {"type": "relu"}, "type": "linear"},
+        {"name": "h3",     "dim": 64,  "activation": {"type": "relu"}, "type": "linear"},
+        {"name": "class",  "dim": 10,  "activation": {"type": "identity"}, "type": "linear"},
     ],
 
     "edge_list": [
-        {"source_name": "pixels", "target_name": "h1",    "slot": ""},
-        {"source_name": "h1",     "target_name": "h2",    "slot": ""},
-        {"source_name": "h2",     "target_name": "h3",    "slot": ""},
-        {"source_name": "h3",     "target_name": "class", "slot": ""},
+        {"source_name": "pixels", "target_name": "h1",    "slot": "in"},
+        {"source_name": "h1",     "target_name": "h2",    "slot": "in"},
+        {"source_name": "h2",     "target_name": "h3",    "slot": "in"},
+        {"source_name": "h3",     "target_name": "class", "slot": "in"},
     ],
 
     "task_map": {"x": "pixels", "y": "class"},

@@ -36,17 +36,17 @@ key = jax.random.PRNGKey(0)
 config = {
     # Define nodes (layers)
     "node_list": [
-        {"name": "pixels", "dim": 784, "activation": {"type": "linear"}},
-        {"name": "hidden1", "dim": 256, "activation": {"type": "sigmoid"}},
-        {"name": "hidden2", "dim": 64, "activation": {"type": "sigmoid"}},
-        {"name": "class",  "dim": 10,  "activation": {"type": "linear"}},
+        {"name": "pixels", "dim": 784, "activation": {"type": "identity"}, "type": "linear"},
+        {"name": "hidden1", "dim": 256, "activation": {"type": "sigmoid"}, "type": "linear"},
+        {"name": "hidden2", "dim": 64, "activation": {"type": "sigmoid"}, "type": "linear"},
+        {"name": "class",  "dim": 10,  "activation": {"type": "identity"}, "type": "linear"},
     ],
 
     # Connect nodes with edges
     "edge_list": [
-        {"source_name": "pixels", "target_name": "hidden1", "slot": ""},
-        {"source_name": "hidden1", "target_name": "hidden2", "slot": ""},
-        {"source_name": "hidden2", "target_name": "class",  "slot": ""},
+        {"source_name": "pixels", "target_name": "hidden1", "slot": "in"},
+        {"source_name": "hidden1", "target_name": "hidden2", "slot": "in"},
+        {"source_name": "hidden2", "target_name": "class",  "slot": "in"},
     ],
 
     # Map tasks to nodes

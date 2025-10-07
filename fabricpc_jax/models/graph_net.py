@@ -22,15 +22,15 @@ def build_graph_structure(config: dict) -> GraphStructure:
     """
     Convert configuration dictionary to static GraphStructure.
 
-    Expected config format:
+    Expected config format (matches PyTorch API):
     {
         "node_list": [
-            {"name": "x", "dim": 784, "activation": {"type": "linear"}},
-            {"name": "h", "dim": 256, "activation": {"type": "sigmoid"}},
+            {"name": "x", "dim": 784, "activation": {"type": "identity"}, "type": "linear"},
+            {"name": "h", "dim": 256, "activation": {"type": "relu"}, "type": "linear"},
             ...
         ],
         "edge_list": [
-            {"source_name": "x", "target_name": "h", "slot": ""},
+            {"source_name": "x", "target_name": "h", "slot": "in"},
             ...
         ],
         "task_map": {
@@ -44,6 +44,11 @@ def build_graph_structure(config: dict) -> GraphStructure:
 
     Returns:
         Immutable GraphStructure
+
+    Notes:
+        - Node types supported: "linear" (currently the only node type)
+        - Slot names: "in" for standard input (empty string "" also supported for backward compatibility)
+        - Activation types: "identity", "sigmoid", "tanh", "relu", "leaky_relu", "hard_tanh"
     """
     if "node_list" not in config:
         raise ValueError("config['node_list'] is required")
@@ -66,7 +71,8 @@ def build_graph_structure(config: dict) -> GraphStructure:
     for edge_config in edge_list:
         source = edge_config["source_name"]
         target = edge_config["target_name"]
-        slot = edge_config.get("slot", "")
+        # Default slot is "in" to match PyTorch API (empty string for backward compatibility)
+        slot = edge_config.get("slot", "in")
 
         # Create edge key: source->target:slot
         edge_key = f"{source}->{target}:{slot}"
@@ -85,6 +91,14 @@ def build_graph_structure(config: dict) -> GraphStructure:
         name = node_config["name"]
         dim = node_config["dim"]
         activation = node_config["activation"]
+
+        # Validate node type (optional but recommended)
+        node_type = node_config.get("type", "linear")
+        if node_type.lower() != "linear":
+            raise ValueError(
+                f"Node '{name}' has unsupported type '{node_type}'. "
+                f"Currently only 'linear' node type is supported."
+            )
 
         # Find incoming and outgoing edges
         in_edges: List[str] = []
@@ -311,13 +325,13 @@ def create_pc_graph(
     Example:
         >>> config = {
         ...     "node_list": [
-        ...         {"name": "pixels", "dim": 784, "activation": {"type": "linear"}},
-        ...         {"name": "hidden", "dim": 256, "activation": {"type": "sigmoid"}},
-        ...         {"name": "class", "dim": 10, "activation": {"type": "linear"}},
+        ...         {"name": "pixels", "dim": 784, "activation": {"type": "identity"}, "type": "linear"},
+        ...         {"name": "hidden", "dim": 256, "activation": {"type": "sigmoid"}, "type": "linear"},
+        ...         {"name": "class", "dim": 10, "activation": {"type": "identity"}, "type": "linear"},
         ...     ],
         ...     "edge_list": [
-        ...         {"source_name": "pixels", "target_name": "hidden", "slot": ""},
-        ...         {"source_name": "hidden", "target_name": "class", "slot": ""},
+        ...         {"source_name": "pixels", "target_name": "hidden", "slot": "in"},
+        ...         {"source_name": "hidden", "target_name": "class", "slot": "in"},
         ...     ],
         ...     "task_map": {"x": "pixels", "y": "class"}
         ... }
