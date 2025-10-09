@@ -11,26 +11,26 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class NodeInfo:
-    """Metadata for a single node in the graph."""
-
-    name: str
-    dim: int
-    activation_config: Dict[str, Any]  # {"type": "sigmoid", ...}
-    node_config: Dict[str, Any]
-    slot: Dict[str, Any]  # {"in": "multi", ...}
-    in_degree: int  # Number of incoming edges
-    out_degree: int  # Number of outgoing edges
-    in_edges: Tuple[str, ...]  # Tuple of edge keys
-    out_edges: Tuple[str, ...]  # Tuple of edge keys
-
-@dataclass(frozen=True)
 class SlotInfo:
     """Metadata for an input slot to a node."""
     name: str
     parent_node: str
     is_multi_input: bool
     in_neighbors: Tuple[str, ...]  # Tuple of source node names
+
+@dataclass(frozen=True)
+class NodeInfo:
+    """Metadata for a single node in the graph."""
+
+    name: str
+    dim: int
+    node_config: Dict[str, Any]
+    activation_config: Dict[str, Any]  # {"type": "sigmoid", ...}
+    slots: Dict[str, SlotInfo]  # {"in": SlotInSingle, ...}
+    in_degree: int  # Number of incoming edges
+    out_degree: int  # Number of outgoing edges
+    in_edges: Tuple[str, ...]  # Tuple of edge keys
+    out_edges: Tuple[str, ...]  # Tuple of edge keys
 
 @dataclass(frozen=True)
 class EdgeInfo:
