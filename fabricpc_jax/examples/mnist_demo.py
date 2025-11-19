@@ -58,7 +58,7 @@ config = {
 
 # Training hyperparameters
 train_config = {
-    "num_epochs": 10,       # Number of training epochs
+    "num_epochs": 20,       # Number of training epochs
     "infer_steps": 20,      # Inference steps
     "eta_infer": 0.05,      # Inference learning rate
     "optimizer": {"type": "adam", "lr": 0.001, "weight_decay": 0.001},

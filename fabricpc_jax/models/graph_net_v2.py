@@ -29,6 +29,7 @@ from fabricpc_jax.core.initialization import (
 )
 from fabricpc_jax.nodes import get_node_class_from_type
 from fabricpc_jax.core.inference_v2 import compute_errors
+from fabricpc_jax.utils.helpers import update_node_in_state
 
 
 def validate_node_and_build_slots(
@@ -353,7 +354,6 @@ def initialize_state(
         shape = (batch_size, node_info.dim)
 
         # Initialize z_latent
-        z_latent = None
         if node_name in clamps:
             # Use clamped value
             z_latent = clamps[node_name]
@@ -372,7 +372,7 @@ def initialize_state(
         else:
             raise ValueError(f"Unknown init_method: {init_method}")
 
-        # Initialize other state components to zeros
+        # Initialize latents, set other state components to zeros
         node_state_dict[node_name] = NodeState(
             z_latent=z_latent,  # init latent state
             z_mu=jnp.zeros(shape),
@@ -384,44 +384,40 @@ def initialize_state(
             substructure={},
         )
 
-    # Feedforward initialization if requested
-    if init_method == "feedforward" and params is not None:
-        from fabricpc_jax.core.inference_v2 import compute_node_projection
-
-        # create a draft graph state
-        state = GraphState(
-            nodes=node_state_dict,
-            batch_size=batch_size,
-        )
-
-        # Process nodes in topological order
-        for node_name in structure.node_order:
-            if node_name not in clamps and structure.nodes[node_name].in_degree > 0:
-                # Compute forward projection
-                z_mu_init, pre_act_init, sub_state = compute_node_projection(
-                    params, state, node_name, structure
-                )
-                # update the state with feedforward values
-                # assign z_latent <- z_mu_init
-                # BUG FIX: _replace() returns a new object, must assign it!
-                node_state_dict[node_name] = node_state_dict[node_name]._replace(
-                    z_latent=z_mu_init,
-                    z_mu=z_mu_init,
-                    pre_activation=pre_act_init,
-                    substructure=sub_state,
-                )
-
-    # create a draft graph state
+    # Create a draft graph state
     state = GraphState(
         nodes=node_state_dict,
         batch_size=batch_size,
     )
+    # Feedforward initialization if requested
+    if init_method == "feedforward" and params is not None:
+        from fabricpc_jax.core.inference_v2 import compute_node_projection
+
+        # Process nodes in topological order
+        for node_name in structure.node_order:
+            if structure.nodes[node_name].in_degree > 0:
+                # Compute forward projection
+                z_mu_init, pre_act_init, sub_state = compute_node_projection(
+                    params, state, node_name, structure
+                )
+                # Update the state with feedforward values
+                if node_name not in clamps:
+                    # z_latent <- z_mu_init
+                    z_latent_init = z_mu_init
+                else:
+                    # Respect clamped values
+                    z_latent_init = clamps[node_name]
+                # Update state
+                state = update_node_in_state(state, node_name,
+                                            z_latent=z_latent_init,
+                                            z_mu=z_mu_init,
+                                            pre_activation=pre_act_init,
+                                            substructure=sub_state)
 
     # Compute the initial energy
     state = compute_errors(state, structure)
 
     return state
-
 
 def create_pc_graph(
     config: dict,

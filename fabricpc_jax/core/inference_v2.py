@@ -13,6 +13,7 @@ from fabricpc_jax.core.types import GraphParams, GraphState, GraphStructure
 from fabricpc_jax.core.activations import get_activation
 from fabricpc_jax.nodes import get_node_class_from_type
 from fabricpc_jax.core.types import NodeParams, NodeInfo
+from fabricpc_jax.utils.helpers import update_node_in_state
 
 
 def gather_inputs(
@@ -101,14 +102,7 @@ def compute_latent_gradients(
         grad = jnp.zeros_like(node_state.z_latent)
 
         # Replace the latent gradient in state
-        state = state._replace(
-            nodes={
-                **state.nodes,
-                node_name: state.nodes[node_name]._replace(
-                    latent_grad=grad
-                )
-            }
-        )
+        state = update_node_in_state(state, node_name, latent_grad=grad)
 
     # Backpropagate errors to pre-synaptic nodes through Jacobians
     for node_name, node_info in structure.nodes.items():
@@ -126,15 +120,8 @@ def compute_latent_gradients(
         for source_name, grad in grad_contrib.items():
             latent_grad = state.nodes[source_name].latent_grad
             latent_grad = latent_grad + grad  # Send gradient contribution to source node
-            # Update the state with new latent gradients
-            state = state._replace(
-                nodes={
-                    **state.nodes,
-                    source_name: state.nodes[source_name]._replace(
-                        latent_grad=latent_grad
-                    )
-                }
-            )
+            # Update the state with added gradient contribution
+            state = update_node_in_state(state, source_name, latent_grad=latent_grad)
 
     # TODO if using preactivation latents, multiply by activation derivative here
     # if latent_type == "preactivation":
@@ -145,14 +132,7 @@ def compute_latent_gradients(
     #         latent_grad = state.nodes[node_name].latent_grad
     #         latent_grad = latent_grad * act_deriv(node_state.pre_activation)
     #         # Update the state with new latent gradients
-    #         state = state._replace(
-    #             nodes={
-    #                 **state.nodes,
-    #                 node_name: state.nodes[node_name]._replace(
-    #                     latent_grad=latent_grad
-    #                 )
-    #             }
-    #         )
+    #         state = update_node_in_state(state, node_name, latent_grad)
 
     return state
 
@@ -183,18 +163,9 @@ def compute_all_projections(
         )
 
         # Update the state with new predictions
-        state = state._replace(
-            nodes={
-                **state.nodes,
-                node_name: state.nodes[node_name]._replace(
-                    z_mu=z_mu,
-                    pre_activation=pre_activation,
-                    substructure=substructure_state                )
-            }
-        )
+        state = update_node_in_state(state, node_name, z_mu=z_mu, pre_activation=pre_activation, substructure=substructure_state)
 
     return state
-
 
 def compute_errors(
     state: GraphState,
@@ -233,16 +204,7 @@ def compute_errors(
             gain_mod_error = error * gain
 
         # Update the state with new errors
-        state = state._replace(
-            nodes={
-                **state.nodes,
-                node_name: state.nodes[node_name]._replace(
-                    error=error,
-                    gain_mod_error=gain_mod_error,
-                    energy=energy
-                )
-            }
-        )
+        state = update_node_in_state(state, node_name, error=error, gain_mod_error=gain_mod_error, energy=energy)
 
     return state
 
@@ -275,25 +237,17 @@ def inference_step(
     # 3. Compute gradients, local to each node
     state = compute_latent_gradients(state, params, structure)
 
-    # 4. Update latent states
+    # 4. Update latent states by gradient descent
     for node_name in structure.nodes:
         node_state = state.nodes[node_name]
-        new_z_latent = None
         if node_name in clamps:
             # Keep clamped nodes fixed
             new_z_latent = clamps[node_name]
         else:
-            # Update via gradient descent
+            # Gradient descent
             new_z_latent = node_state.z_latent - eta_infer * node_state.latent_grad
-        # Update the state
-        state = state._replace(
-            nodes={
-                **state.nodes,
-                node_name: state.nodes[node_name]._replace(
-                    z_latent=new_z_latent
-                )
-            }
-        )
+        # Update state
+        state = update_node_in_state(state, node_name, z_latent=new_z_latent)
 
     return state
 
