@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from evaluation.visualize_experiment import plot_generated_images
+from fabricpc.evaluation.visualize_experiment import plot_generated_images
 
 
 # Train Loop
