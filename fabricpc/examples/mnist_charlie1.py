@@ -44,7 +44,7 @@ config = {
     "node_list": [
         {"name": "pixels",  "dim": 784, "type": "linear", "activation": {"type": "identity"}},
         {"name": "hidden1", "dim": 256, "type": "linear", "activation": {"type": "sigmoid"}},
-        {"name": "hidden2", "dim": 64,  "type": "linear", "activation": {"type": "sigmoid"}},
+        {"name": "hidden2", "dim": 75,  "type": "linear", "activation": {"type": "sigmoid"}},
         {"name": "class",   "dim": 10,  "type": "linear", "activation": {"type": "sigmoid"}},
     ],
 
