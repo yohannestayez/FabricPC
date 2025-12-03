@@ -39,11 +39,11 @@ np.random.seed(0)
 config = {
     # Deeper 3-hidden-layer network
     "node_list": [
-        {"name": "pixels", "dim": 784, "type": "linear", "activation": {"type": "identity"}},
-        {"name": "h1",     "dim": 256, "type": "linear", "activation": {"type": "sigmoid"}},
-        {"name": "h2",     "dim": 128, "type": "linear", "activation": {"type": "sigmoid"}},
-        {"name": "h3",     "dim": 64, "type": "linear",  "activation": {"type": "sigmoid"}},
-        {"name": "class",  "dim": 10, "type": "linear",  "activation": {"type": "sigmoid"}},
+        {"name": "pixels", "shape": (784,), "type": "linear", "activation": {"type": "identity"}},
+        {"name": "h1",     "shape": (256,), "type": "linear", "activation": {"type": "sigmoid"}},
+        {"name": "h2",     "shape": (128,), "type": "linear", "activation": {"type": "sigmoid"}},
+        {"name": "h3",     "shape": (64,), "type": "linear",  "activation": {"type": "sigmoid"}},
+        {"name": "class",  "shape": (10,), "type": "linear",  "activation": {"type": "sigmoid"}},
     ],
 
     "edge_list": [
@@ -83,7 +83,7 @@ print(f"  Edges: {len(config['edge_list'])}")
 print(f"  Total parameters: {num_params:,}")
 print(f"\n  Layer sizes: ", end="")
 for node in config['node_list']:
-    print(f"{node['dim']} → ", end="")
+    print(f"{node['shape']} → ", end="")
 print("(output)")
 
 # ==============================================================================

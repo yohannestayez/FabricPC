@@ -3,9 +3,14 @@ Linear node implementation for JAX predictive coding networks.
 
 This implements a linear transformation node with configurable activation functions.
 The node has a single multi-input slot that accepts multiple incoming connections.
+
+Linear nodes flatten all non-batch dimensions of inputs for the matrix multiplication,
+then reshape outputs back to the target shape. This makes them function as dense/fully-connected
+layers regardless of input tensor dimensionality.
 """
 
 from typing import Dict, Any, Tuple
+import numpy as np
 import jax
 import jax.numpy as jnp
 
@@ -41,8 +46,8 @@ class LinearNode(NodeBase):
     @staticmethod
     def initialize_params(
         key: jax.Array,  # from jax.random.PRNGKey
-        node_dim: int,
-        input_dims: Dict[str, int],
+        node_shape: Tuple[int, ...],
+        input_shapes: Dict[str, Tuple[int, ...]],
         config: Dict[str, Any]
     ) -> NodeParams:
         """
@@ -51,17 +56,19 @@ class LinearNode(NodeBase):
             NodeParams.weights: is a dict keyed by EdgeInfo.key for each incoming edge.
             NodeParams.biases: Dict['b': bias vector]
 
+        Linear nodes flatten inputs before matmul, so weights have shape (in_numel, out_numel).
+
         Args:
             key: JAX random key
-            node_dim: Output dimension of this node
-            input_dims: Dictionary with EdgeInfo.key -> input dimension for that edge
+            node_shape: Output shape of this node (excluding batch dimension)
+            input_shapes: Dictionary with EdgeInfo.key -> source shape for that edge
             config: Node configuration with weight_init settings
 
         Returns:
             NodeParams with initialized W and b
         """
-        # Counter for total input dimension from the "in" slot
-        total_in_dim = 0
+        # Compute output numel (flattened dimension)
+        out_numel = int(np.prod(node_shape))
 
         # Get weight initialization config
         default_cfg = {"type": "normal", "mean": 0.0, "std": 0.05}
@@ -73,17 +80,19 @@ class LinearNode(NodeBase):
         # Initialize weight matrix
         # this node class uses multi-input "in" slot; create weights for each incoming edge
         weights_dict = {}
-        rand_key_w = dict(zip(input_dims.keys(), jax.random.split(key_w, len(input_dims))))
-        for edge_key, in_dim in input_dims.items():
+        rand_key_w = dict(zip(input_shapes.keys(), jax.random.split(key_w, len(input_shapes))))
+        for edge_key, in_shape in input_shapes.items():
             if ":in" not in edge_key:
                 raise ValueError(f"linear node requires 'in' slot dimension. got edge key {edge_key}")  # validate that edges correspond to "in" slot
-            weights_dict[edge_key] = initialize_weights(weight_init_config, rand_key_w[edge_key], (in_dim, node_dim))
-            total_in_dim += in_dim
+            in_numel = int(np.prod(in_shape))
+            weights_dict[edge_key] = initialize_weights(weight_init_config, rand_key_w[edge_key], (in_numel, out_numel))
 
         # Initialize bias (usually zeros)
+        # Bias shape is (1,) + node_shape for proper broadcasting
         use_bias = config.get("use_bias", True)
         if use_bias:
-            b = jnp.zeros((1, node_dim))
+            bias_shape = (1,) + node_shape
+            b = jnp.zeros(bias_shape)
 
         return NodeParams(
             weights=weights_dict,
@@ -104,6 +113,8 @@ class LinearNode(NodeBase):
         Computes:
             forward pass -> compute error -> compute energy -> total energy
 
+        Inputs are flattened before matmul, outputs are reshaped to node_info.shape.
+
         Args:
             params: Node parameters (weights, biases)
             inputs: Dictionary mapping edge keys to input tensors
@@ -118,33 +129,43 @@ class LinearNode(NodeBase):
         from fabricpc.nodes import get_node_class_from_type
         node_class = get_node_class_from_type(node_info.node_type)
 
-        # Initialize pre-activation
-        node_out_shape = state.z_latent.shape
-        pre_activation = jnp.zeros(node_out_shape)
+        # Get batch size and output shape
+        batch_size = state.z_latent.shape[0]
+        out_shape = node_info.shape  # e.g., (128,) or (28, 28, 1)
+        out_numel = int(np.prod(out_shape))
 
         if node_info.in_degree == 0:
             # Source nodes: no inputs
             z_mu = state.z_latent  # prediction is the latent state itself
+            pre_activation = jnp.zeros_like(state.z_latent)
             error = jnp.zeros_like(state.z_latent)
             gain_mod_error = jnp.zeros_like(state.z_latent)
         else:
-            # Linear transformation
-            for edge_key, x in inputs.items():
-                pre_activation = pre_activation + jnp.matmul(x, params.weights[edge_key])
+            # Linear transformation with flatten/reshape
+            # Accumulate in flat space: (batch, out_numel)
+            pre_activation_flat = jnp.zeros((batch_size, out_numel))
 
-            # Add bias if present
+            for edge_key, x in inputs.items():
+                # Flatten input: (batch, *in_shape) -> (batch, in_numel)
+                x_flat = x.reshape(batch_size, -1)
+                pre_activation_flat = pre_activation_flat + jnp.matmul(x_flat, params.weights[edge_key])
+
+            # Reshape to output shape: (batch, out_numel) -> (batch, *out_shape)
+            pre_activation = pre_activation_flat.reshape(batch_size, *out_shape)
+
+            # Add bias if present (bias already has shape (1, *out_shape))
             if "b" in params.biases and params.biases["b"].size > 0:
                 pre_activation = pre_activation + params.biases["b"]
 
             # Apply activation function
             activation_fn, activation_deriv = get_activation(node_info.activation_config)
-            z_mu = activation_fn(pre_activation)  # TODO turn off activation if latents represent preactivations
+            z_mu = activation_fn(pre_activation)
 
             # Error
             error = state.z_latent - z_mu
 
             # Gain-modulated error (use newly computed pre_activation, not state.pre_activation)
-            f_prime = activation_deriv(pre_activation)  # shape (batch_size, dim_node_latent)
+            f_prime = activation_deriv(pre_activation)  # shape (batch_size, *out_shape)
             gain_mod_error = error * f_prime  # element-wise multiplication
 
         # Update node state
@@ -171,6 +192,8 @@ class LinearNode(NodeBase):
         Forward pass: updates node state and computes gradients w.r.t. inputs.
         Explicitly compute gradients
 
+        Gradients are computed in flat space and reshaped back to source shapes.
+
         Args:
             params: Node parameters (weights, biases)
             inputs: Dictionary mapping edge keys to input tensors
@@ -194,25 +217,29 @@ class LinearNode(NodeBase):
         latent_is_preactivation = node_info.node_config.get("latent_type") == "preactivation"
         input_grads = {}
 
+        batch_size = state.z_latent.shape[0]
+
         # Back-synapse gradients for each edge, and accumulate to source nodes
-        # ∂E/∂z_source = -Wcompute_params_gradient^T @ gain_mod_error_target
+        # ∂E/∂z_source = -W^T @ gain_mod_error_target
         for edge_key, z in inputs.items():
+            # Get source shape from input tensor
+            source_shape = z.shape[1:]  # exclude batch dimension
 
             if energy_functional == "gaussian":
                 if latent_is_preactivation:
                     raise NotImplementedError("pre-activation latent type not implemented for LinearNode with Gaussian energy.")
                     grad_contribution = -jnp.matmul(state.error, params.weights[edge_key].T)
-                    # error (batch, dim_t)
-                    # weights{s->t} (dim_s, dim_t)
+                    # error (batch, dim_tgt)
+                    # weights{s->t} (dim_src, dim_tgt)
                 else:
-                    # For Gaussian energy, the gradient contribution is W @ gain_mod_error
-                    grad_contribution = -jnp.matmul(state.gain_mod_error, params.weights[edge_key].T)
-                    # gain_mod_error (batch, dim_t) = error * f'(a)
-                    # weights{s->t} (dim_s, dim_t)
+                    # Flatten gain_mod_error: (batch, *out_shape) -> (batch, out_numel)
+                    gain_mod_error_flat = state.gain_mod_error.reshape(batch_size, -1)
+                    # Compute gradient in flat space: (batch, out_numel) @ (out_numel, in_numel) -> (batch, in_numel)
+                    grad_flat = -jnp.matmul(gain_mod_error_flat, params.weights[edge_key].T)
+                    # Reshape back to source shape: (batch, in_numel) -> (batch, *source_shape)
+                    grad_contribution = grad_flat.reshape(batch_size, *source_shape)
             else:
                 raise NotImplementedError(f"energy functional '{energy_functional}' not implemented in LinearNode.")
-                # _, activation_deriv = get_activation(node_info.node_config.get("activation_config"))
-                # f_prime = activation_deriv(node_state.pre_activation)  # shape (batch_size, dim_node_latent)
 
             input_grads[edge_key] = grad_contribution
 
@@ -229,7 +256,8 @@ class LinearNode(NodeBase):
         Forward pass: update state and compute gradients of weights for local learning.
         Explicitly compute gradients
 
-        The local gradient for weights is: -(input.T @ gain_mod_error)
+        The local gradient for weights is: -(input_flat.T @ gain_mod_error_flat)
+        Inputs and errors are flattened before computing gradients.
 
         Args:
             params: Current node parameters
@@ -248,17 +276,28 @@ class LinearNode(NodeBase):
         # Forward pass to get new state
         _, state = node_class.forward(params, inputs, state, node_info)
 
+        batch_size = state.z_latent.shape[0]
         weight_grads = {}
         bias_grads = {}
 
+        # Flatten gain_mod_error: (batch, *out_shape) -> (batch, out_numel)
+        gain_mod_error_flat = state.gain_mod_error.reshape(batch_size, -1)
+
         # Weight gradient
         for edge_key, in_tensor in inputs.items():
-            grad_w = -jnp.matmul(in_tensor.T, state.gain_mod_error)
+            # Flatten input: (batch, *in_shape) -> (batch, in_numel)
+            in_flat = in_tensor.reshape(batch_size, -1)
+            # Compute gradient: (in_numel, batch) @ (batch, out_numel) -> (in_numel, out_numel)
+            grad_w = -jnp.matmul(in_flat.T, gain_mod_error_flat)
             weight_grads[edge_key] = grad_w
 
-        # Bias gradient
+        # Bias gradient - sum over batch, keep shape (1, *out_shape)
         if "b" in params.biases:
-            grad_b = -jnp.sum(state.gain_mod_error, axis=0, keepdims=True)
+            # Sum over batch dimension only, reshape gain_mod_error_flat back to out_shape
+            out_shape = node_info.shape
+            gain_mod_error_shaped = state.gain_mod_error  # already (batch, *out_shape)
+            # Sum over batch (axis=0), keepdims to get (1, *out_shape)
+            grad_b = -jnp.sum(gain_mod_error_shaped, axis=0, keepdims=True)
             bias_grads["b"] = grad_b
 
         return state, NodeParams(weights=weight_grads, biases=bias_grads)

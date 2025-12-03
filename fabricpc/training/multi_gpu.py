@@ -405,7 +405,7 @@ def evaluate_pcn_multi_gpu(
         # (We need to reshape back from (n_devices, batch_per_device, ...) to (batch_size, ...))
         if "y" in structure.task_map:
             y_node = structure.task_map["y"]
-            predictions = final_states[y_node].z_latent  # (n_devices, batch_per_device, dim)
+            predictions = final_states[y_node].z_latent  # (n_devices, batch_per_device, *shape)
             predictions = predictions.reshape(batch_size, -1)
             targets = batch["y"]
 

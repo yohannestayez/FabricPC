@@ -29,13 +29,19 @@ python examples/mnist_demo.py
 
 **Expected Results**:
 ```
-Epoch 1/20, Loss: 0.9054
-Epoch 2/20, Loss: 0.3796
-Epoch 3/20, Loss: 0.1513
-Epoch 4/20, Loss: 0.0964
+Epoch 1/20, Loss: 0.4529
+Epoch 2/20, Loss: 0.1903
+Epoch 3/20, Loss: 0.0757
+Epoch 4/20, Loss: 0.0482
 ...
-Epoch 20/20, Loss: 0.0087
-Test Accuracy: 97.96%
+Epoch 18/20, Loss: 0.0052
+Epoch 19/20, Loss: 0.0047
+Epoch 20/20, Loss: 0.0043
+Avg Training time: 2.05 seconds per epoch
+
+Evaluating...
+Test Accuracy: 97.93%
+Test Loss: 0.0349
 ```
 
 **Features Demonstrated**:

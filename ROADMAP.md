@@ -32,12 +32,13 @@ This roadmap addresses:
 **Current State**: NodeState assumes 2D tensors `(batch, dim)`.
 
 **Requirements**:
-- [ ] Extend `NodeState` to support arbitrary shapes `(batch, *spatial_dims, channels)`
-- [ ] Update `NodeInfo` with `shape: Tuple[int, ...]` instead of just `dim: int`
-- [ ] Modify inference loop to handle tensor reshaping correctly
-- [ ] Update error computation for n-dimensional predictions
-- [ ] Ensure Jacobian computation works with higher-rank tensors
-
+- [x] Extend `NodeState` to support arbitrary shapes `(batch, *spatial_dims, channels)`
+- [x] Update `NodeInfo` with `shape: Tuple[int, ...]` instead of just `dim: int`
+- [x] Modify inference loop to handle tensor reshaping correctly
+- [x] Update `LinearNode` to flatten inputs for matmul, reshape outputs
+- [x] Ensure backward compatibility with existing 2D use cases
+- [x] Add comprehensive tests for n-dim shapes
+- [x] Plan for future convolutional node support using channels-last convention
 **Implementation**:
 ```python
 # types.py changes
@@ -53,6 +54,235 @@ class NodeInfo:
         """Backward-compatible flat dimension."""
         return int(jnp.prod(jnp.array(self.shape)))
 ```
+
+  1. Batch dimension handling: Batch is a runtime value in GraphState.batch_size, not part of node definitions
+  2. Shape system: NodeInfo.shape as tuple, with backward-compatible dim property
+  3. LinearNode behavior: Flatten inputs for matmul, reshape outputs back
+  4. Future conv support: input_dims provides full shapes, channels-last convention
+
+
+Batch dimension is a runtime value, NOT part of node/parameter definitions.
+ Summary
+
+ Extend FabricPC to support arbitrary tensor shapes beyond 2D (batch, dim), enabling nodes with shapes like (batch, height, width, channels) for images or (batch, seq_len, embed_dim) for sequences.
+
+ Batch Dimension Design
+
+ Core Principle
+
+ Batch dimension is a runtime value, NOT part of node/parameter definitions.
+
+ | Component             | Contains Batch? | Shape Pattern                       |
+ |-----------------------|-----------------|-------------------------------------|
+ | NodeInfo.shape        | NO              | (dim1, dim2, ...) e.g., (28, 28, 1) |
+ | NodeParams.weights    | NO              | (in_features, out_features)         |
+ | NodeParams.biases     | NO              | (1, *out_shape) for broadcasting    |
+ | NodeState.z_latent    | YES             | (batch_size, *shape)                |
+ | GraphState.batch_size | Stores it       | Scalar integer                      |
+
+ Batch Flow
+
+ Data arrives with batch dimension
+          ↓
+ train_step: batch_size = data.shape[0]
+          ↓
+ initialize_state(structure, batch_size, ...)
+          ↓
+ For each node:
+     shape = (batch_size, *node_info.shape)
+     z_latent = zeros(shape)
+          ↓
+ GraphState(nodes={...}, batch_size=batch_size)
+          ↓
+ Same params work with ANY batch_size
+
+ Implementation Steps
+
+ Step 1: Update NodeInfo Type Definition
+
+ File: fabricpc/core/types.py
+
+ @dataclass(frozen=True)
+ class NodeInfo:
+     name: str
+     shape: Tuple[int, ...]  # Changed from dim: int
+     node_type: str
+     node_config: Dict[str, Any]
+     activation_config: Dict[str, Any]
+     slots: Dict[str, SlotInfo]
+     in_degree: int
+     out_degree: int
+     in_edges: Tuple[str, ...]
+     out_edges: Tuple[str, ...]
+
+     @property
+     def dim(self) -> int:
+         """Backward-compatible flat dimension (product of shape)."""
+         return int(np.prod(self.shape))
+
+ Step 2: Update Graph Construction
+
+ File: fabricpc/graph/graph_net.py
+
+ 1. build_graph_structure: Parse shape from config, default to (dim,) if only dim provided
+ 2. initialize_state: Use (batch_size, *node_info.shape) for tensor creation
+
+ Step 3: Update Energy Computation
+
+ File: fabricpc/nodes/base.py
+
+ @staticmethod
+ def energy_functional(state: NodeState, node_info: NodeInfo) -> NodeState:
+     # Sum over ALL non-batch dimensions
+     axes_to_sum = tuple(range(1, len(state.error.shape)))
+     energy = 0.5 * jnp.sum(state.error ** 2, axis=axes_to_sum)
+     # latent_grad also needs same treatment
+     latent_grad = state.latent_grad + state.error
+     return state._replace(energy=energy, latent_grad=latent_grad)
+
+ Step 4: Update LinearNode for Arbitrary Shapes
+
+ File: fabricpc/nodes/linear.py
+
+ Linear nodes will flatten non-batch dimensions for matmul, then reshape back:
+
+ @staticmethod
+ def forward(params, inputs, state, node_info):
+     batch_size = state.z_latent.shape[0]
+     out_shape = node_info.shape  # e.g., (784,) or (28, 28, 1)
+     out_numel = int(np.prod(out_shape))
+
+     pre_activation = jnp.zeros((batch_size, out_numel))
+
+     for edge_key, x in inputs.items():
+         # Flatten input: (batch, *in_shape) -> (batch, in_numel)
+         x_flat = x.reshape(batch_size, -1)
+         pre_activation = pre_activation + jnp.matmul(x_flat, params.weights[edge_key])
+
+     # Add bias
+     if "b" in params.biases:
+         pre_activation = pre_activation + params.biases["b"]
+
+     # Reshape to output shape: (batch, out_numel) -> (batch, *out_shape)
+     pre_activation = pre_activation.reshape(batch_size, *out_shape)
+
+     # ... rest of forward (activation, error, energy)
+
+ Step 5: Update Weight Initialization
+
+ Files: fabricpc/nodes/linear.py, fabricpc/graph/graph_net.py
+
+ Change input_dims type from Dict[str, int] to Dict[str, Tuple[int, ...]]:
+ - This enables future conv nodes to access full source shapes for kernel initialization
+ - LinearNode computes in_numel = prod(in_shape) for its weights
+
+ In graph_net.py _build_node_params:
+ # Build input_dims with full shapes (not just dim)
+ input_dims = {}
+ for edge_key in node_info.in_edges:
+     source_name = structure.edges[edge_key].source
+     source_shape = structure.nodes[source_name].shape  # Full shape tuple
+     input_dims[edge_key] = source_shape
+
+ In linear.py:
+ @staticmethod
+ def initialize_params(key, node_shape, input_dims, config):
+     # input_dims: Dict[str, Tuple[int, ...]] - full shapes
+     # node_shape: Tuple[int, ...] e.g., (784,) or (10,)
+     out_numel = int(np.prod(node_shape))
+
+     weights_dict = {}
+     for edge_key, in_shape in input_dims.items():
+         in_numel = int(np.prod(in_shape))  # Flatten for linear
+         weights_dict[edge_key] = initialize_weights(config, key, (in_numel, out_numel))
+
+     # Bias shape for broadcasting: (1, *node_shape)
+     bias_shape = (1,) + node_shape
+     biases = {"b": jnp.zeros(bias_shape)} if config.get("use_bias", True) else {}
+
+     return NodeParams(weights=weights_dict, biases=biases)
+
+ Step 6: Update Gradient Computations
+
+ File: fabricpc/nodes/linear.py
+
+ For forward_inference (input gradients) and forward_learning (weight gradients):
+
+ # Get source shape from structure (passed via node_info or looked up)
+ # forward_inference needs to know source shapes to reshape gradients
+
+ # Input gradients - need to reshape back to source shape
+ batch_size = state.z_latent.shape[0]
+ grad_flat = -jnp.matmul(state.gain_mod_error.reshape(batch_size, -1),
+                         params.weights[edge_key].T)
+ # Reshape back using source shape from inputs
+ source_shape = inputs[edge_key].shape[1:]  # Get shape from input tensor itself
+ input_grads[edge_key] = grad_flat.reshape(batch_size, *source_shape)
+
+ # Weight gradients - flatten both tensors
+ in_flat = in_tensor.reshape(batch_size, -1)
+ error_flat = state.gain_mod_error.reshape(batch_size, -1)
+ grad_w = -jnp.matmul(in_flat.T, error_flat)
+
+ Key insight: Source shapes can be inferred from inputs[edge_key].shape[1:] since inputs already have the correct shape at runtime.
+
+ Files to Modify
+
+ | File                        | Changes                                                                              |
+ |-----------------------------|--------------------------------------------------------------------------------------|
+ | fabricpc/core/types.py      | NodeInfo.dim: int → NodeInfo.shape: Tuple[int, ...], add dim property                |
+ | fabricpc/graph/graph_net.py | Parse shape from config, input_dims returns shapes not ints, update initialize_state |
+ | fabricpc/nodes/base.py      | Dynamic axis handling in energy_functional, update initialize_params signature       |
+ | fabricpc/nodes/linear.py    | Flatten/reshape in forward, init with shapes, gradient reshape                       |
+ | tests/test_fabricpc.py      | Add tests for n-dim shapes                                                           |
+ | tests/test_ndim_shapes.py   | New file with comprehensive n-dim tests                                              |
+
+ Backward Compatibility
+
+ 1. Config parsing: If only dim provided, convert to shape = (dim,)
+ 2. NodeInfo.dim property: Returns prod(shape) for existing code
+ 3. Tests: Existing tests use dim, should continue to work
+
+ Test Cases to Add
+
+ 1. Node with 1D shape: shape=(784,) - current behavior
+ 2. Node with 2D shape: shape=(28, 28) - image without channels
+ 3. Node with 3D shape: shape=(28, 28, 1) - image with channels
+ 4. Mixed shapes in graph: input (784,) -> hidden (128,) -> output (10,)
+ 5. Verify same params work with batch_size=1, 32, 128
+
+ Future Conv Support Considerations
+
+ The shape system must support future convolutional nodes:
+
+ Shape Conventions
+
+ - 1D Conv: shape=(seq_len, channels) - e.g., (100, 32) for 100 timesteps, 32 channels
+ - 2D Conv: shape=(H, W, C) - e.g., (28, 28, 64) for 28x28 image, 64 channels (NHWC)
+ - 3D Conv: shape=(D, H, W, C) - e.g., (32, 32, 32, 16) for 3D volume
+
+ Key Design: Channels Last
+
+ All shapes use channels-last format (NHWC, NLC, NDHWC):
+ - Consistent with JAX's default conv behavior
+ - Simplifies broadcasting for biases: bias.shape = (1, 1, 1, C)
+ - Channel dimension is always the last axis
+
+ Conv Node Shape Flow (Future Reference)
+
+ Input:  (batch, H_in, W_in, C_in)   e.g., (32, 28, 28, 1)
+ Kernel: (kH, kW, C_in, C_out)       e.g., (3, 3, 1, 64)
+ Output: (batch, H_out, W_out, C_out) e.g., (32, 26, 26, 64)
+
+ EdgeInfo Updates Needed for Conv
+
+ Conv nodes need source shape info for kernel initialization:
+ - input_dims in initialize_params should provide full shape, not just numel
+ - Currently: input_dims: Dict[str, int] (flattened dim)
+ - Future: input_dims: Dict[str, Tuple[int, ...]] (full shape)
+
+ This change is included in Step 5 to ensure forward compatibility.
+
 
 **Files to Modify**:
 - `fabricpc/core/types.py` - NodeInfo shape field

@@ -20,10 +20,20 @@ class SlotInfo:
 
 @dataclass(frozen=True)
 class NodeInfo:
-    """Metadata for a single node in the graph."""
+    """Metadata for a single node in the graph.
+
+    The shape field represents the output dimensions of the node, excluding
+    the batch dimension. Batch is always the first dimension in arrays
+    and is stored in GraphState.batch_size at runtime.
+
+    Examples:
+        - Linear layer: shape=(128,) for 128-dimensional output
+        - Image: shape=(28, 28, 1) for 28x28 grayscale image (NHWC format)
+        - Sequence: shape=(100, 64) for 100 timesteps, 64 features
+    """
 
     name: str
-    dim: int  # output dimension of the node  # TODO make List[int] representing shape, excludes the batch dimension. Batch is always first dimension in arrays and given by GraphState.
+    shape: Tuple[int, ...]  # Output shape excluding batch dimension
     node_type: str  # "linear", "transformer", etc.
     node_config: Dict[str, Any]
     activation_config: Dict[str, Any]  # {"type": "sigmoid", ...}

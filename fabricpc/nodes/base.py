@@ -56,8 +56,8 @@ class NodeBase(ABC):
     @abstractmethod
     def initialize_params(
         key: jax.Array,  # from jax.random.PRNGKey
-        node_dim: int,
-        input_dims: Dict[str, int],  # slot_name -> total input dimension
+        node_shape: Tuple[int, ...],
+        input_shapes: Dict[str, Tuple[int, ...]],  # edge_key -> source shape
         config: Dict[str, Any]
     ) -> NodeParams:
         """
@@ -66,17 +66,19 @@ class NodeBase(ABC):
 
         Args:
             key: JAX random key
-            node_dim: Dimension of this node's output
-            input_dims: Dictionary mapping slot names to total input dimensions
+            node_shape: Output shape of this node (excluding batch dimension)
+            input_shapes: Dictionary mapping edge keys to source node shapes
             config: Node configuration (may contain initialization settings)
 
         Returns:
             NodeParams with initialized weights and biases
 
         Example:
-            For a linear node with one multi-input slot "in":
-            weights = {"W": initialize_weights(key, (input_dims["in"], node_dim))}
-            biases = {"b": jnp.zeros((1, node_dim))}
+            For a linear node with inputs from edge "a->b:in":
+            in_numel = int(np.prod(input_shapes["a->b:in"]))
+            out_numel = int(np.prod(node_shape))
+            weights = {"a->b:in": initialize_weights(key, (in_numel, out_numel))}
+            biases = {"b": jnp.zeros((1,) + node_shape)}
             return NodeParams(weights=weights, biases=biases)
         """
         pass
@@ -193,7 +195,9 @@ class NodeBase(ABC):
             latent_grad: derivative of energy w.r.t. z_latent
         """
         # 1. Compute energy: E = 0.5 * ||error||^2
-        energy = 0.5 * jnp.sum(state.error ** 2, axis=1)  # sum over latent dimensions, don't sum over batch
+        # Sum over ALL non-batch dimensions (supports arbitrary tensor shapes)
+        axes_to_sum = tuple(range(1, len(state.error.shape)))
+        energy = 0.5 * jnp.sum(state.error ** 2, axis=axes_to_sum)
 
         # 2. Compute latent gradient: dE/dz_latent
         grad = state.error  # derivative of energy w.r.t. z_latent

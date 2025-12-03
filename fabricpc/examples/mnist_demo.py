@@ -44,10 +44,10 @@ graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
 config = {
     # Define nodes (layers)
     "node_list": [
-        {"name": "pixels",  "dim": 784, "type": "linear", "activation": {"type": "identity"}},
-        {"name": "hidden1", "dim": 256, "type": "linear", "activation": {"type": "sigmoid"}},
-        {"name": "hidden2", "dim": 64,  "type": "linear", "activation": {"type": "sigmoid"}},
-        {"name": "class",   "dim": 10,  "type": "linear", "activation": {"type": "sigmoid"}},
+        {"name": "pixels",  "shape": (784,), "type": "linear", "activation": {"type": "identity"}},
+        {"name": "hidden1", "shape": (256,), "type": "linear", "activation": {"type": "sigmoid"}},
+        {"name": "hidden2", "shape": (64,),  "type": "linear", "activation": {"type": "sigmoid"}},
+        {"name": "class",   "shape": (10,),  "type": "linear", "activation": {"type": "sigmoid"}},
     ],
 
     # Connect nodes with edges
@@ -129,7 +129,7 @@ print("\n" + "="*70)
 print("That's it! Want to change the architecture?")
 print("Just modify the config dictionary above:")
 print("  - Add more nodes to node_list for deeper networks")
-print("  - Change 'dim' values to make layers wider/narrower")
+print("  - Change 'shape' values to make layers wider/narrower")
 print("  - Modify edge_list to create different connection patterns")
 print("  - No need to change any other code!")
 print("\nJAX Benefits:")

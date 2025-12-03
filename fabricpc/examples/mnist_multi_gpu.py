@@ -39,10 +39,10 @@ np.random.seed(0)
 
 config = {
     "node_list": [
-        {"name": "pixels", "dim": 784, "type": "linear", "activation": {"type": "identity"}},
-        {"name": "h1",     "dim": 256, "type": "linear", "activation": {"type": "relu"}},
-        {"name": "h2",     "dim": 64, "type": "linear", "activation": {"type": "relu"}},
-        {"name": "class",  "dim": 10, "type": "linear",  "activation": {"type": "identity"}},
+        {"name": "pixels", "shape": (784,), "type": "linear", "activation": {"type": "identity"}},
+        {"name": "h1",     "shape": (256,), "type": "linear", "activation": {"type": "relu"}},
+        {"name": "h2",     "shape": (64,), "type": "linear", "activation": {"type": "relu"}},
+        {"name": "class",  "shape": (10,), "type": "linear",  "activation": {"type": "identity"}},
     ],
 
     "edge_list": [

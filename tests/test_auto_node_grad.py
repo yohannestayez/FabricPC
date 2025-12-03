@@ -37,19 +37,19 @@ def create_config(node_type: str):
         "node_list": [
             {
                 "name": "input",
-                "dim": 8,
+                "shape": (8,),
                 "type": node_type,
                 "activation": {"type": "identity"},
             },
             {
                 "name": "hidden",
-                "dim": 12,
+                "shape": (12,),
                 "type": node_type,
                 "activation": {"type": "tanh"},
             },
             {
                 "name": "output",
-                "dim": 4,
+                "shape": (4,),
                 "type": node_type,
                 "activation": {"type": "sigmoid"},
             },
@@ -83,7 +83,7 @@ class TestLinearAutoGradNode:
 
         node_info = NodeInfo(
             name="dst",
-            dim=output_dim,
+            shape=(output_dim,),
             node_type="linear",
             activation_config={"type": activation},
             node_config={},
@@ -141,7 +141,7 @@ class TestLinearAutoGradNode:
 
         node_info = NodeInfo(
             name="dst",
-            dim=output_dim,
+            shape=(output_dim,),
             node_type="linear",
             activation_config={"type": activation},
             node_config={},

@@ -11,6 +11,7 @@ os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.9")
 os.environ.setdefault("JAX_TRACEBACK_FILTERING", "off")
 
+import numpy as np
 import pytest
 import jax
 import jax.numpy as jnp
@@ -33,13 +34,13 @@ class TestValidation:
             "node_list": [
                 {
                     "name": "x",
-                    "dim": 2,
+                    "shape": (2,),
                     "type": "linear",
                     "activation": {"type": "sigmoid"},
                 },
                 {
                     "name": "x",  # Duplicate name
-                    "dim": 2,
+                    "shape": (2,),
                     "type": "linear",
                     "activation": {"type": "sigmoid"},
                 },
@@ -57,7 +58,7 @@ class TestValidation:
             "node_list": [
                 {
                     "name": "n1",
-                    "dim": 2,
+                    "shape": (2,),
                     "type": "linear",
                     "activation": {"type": "sigmoid"},
                 },
@@ -75,7 +76,7 @@ class TestValidation:
         """Test that edges referencing non-existent nodes raise an error."""
         config = {
             "node_list": [
-                {"name": "a", "dim": 2, "type": "linear"},
+                {"name": "a", "shape": (2,), "type": "linear"},
             ],
             "edge_list": [
                 {"source_name": "a", "target_name": "nonexistent", "slot": "in"},
@@ -97,13 +98,13 @@ class TestShapeConsistency:
             "node_list": [
                 {
                     "name": "a",
-                    "dim": 4,
+                    "shape": (4,),
                     "type": "linear",
                     "activation": {"type": "sigmoid"},
                 },
                 {
                     "name": "b",
-                    "dim": 3,
+                    "shape": (3,),
                     "type": "linear",
                     "activation": {"type": "sigmoid"},
                 },
@@ -132,7 +133,7 @@ class TestShapeConsistency:
         # Check shapes for each node
         for node_name, node_info in structure.nodes.items():
             node_state = state.nodes[node_name]
-            expected_shape = (batch_size, node_info.dim)
+            expected_shape = (batch_size, *node_info.shape)
 
             assert node_state.z_latent.shape == expected_shape, \
                 f"z_latent shape mismatch for {node_name}"
@@ -179,13 +180,13 @@ class TestPropertyBased:
             "node_list": [
                 {
                     "name": "a",
-                    "dim": dim_a,
+                    "shape": (dim_a,),
                     "type": "linear",
                     "activation": {"type": "sigmoid"},
                 },
                 {
                     "name": "b",
-                    "dim": dim_b,
+                    "shape": (dim_b,),
                     "type": "linear",
                     "activation": {"type": "sigmoid"},
                 },
@@ -210,7 +211,7 @@ class TestPropertyBased:
         # Verify shapes
         for node_name, node_info in structure.nodes.items():
             node_state = state.nodes[node_name]
-            expected_shape = (batch_size, node_info.dim)
+            expected_shape = (batch_size, *node_info.shape)
 
             assert node_state.z_latent.shape == expected_shape
             assert node_state.error.shape == expected_shape
@@ -227,8 +228,8 @@ class TestPropertyBased:
         """Test that inference works with various parameter settings."""
         config = {
             "node_list": [
-                {"name": "input", "dim": 3, "type": "linear"},
-                {"name": "output", "dim": 2, "type": "linear"},
+                {"name": "input", "shape": (3,), "type": "linear"},
+                {"name": "output", "shape": (2,), "type": "linear"},
             ],
             "edge_list": [
                 {"source_name": "input", "target_name": "output", "slot": "in"},
@@ -264,10 +265,10 @@ class TestComplexGraphs:
         """Test graph with skip connections."""
         config = {
             "node_list": [
-                {"name": "input", "dim": 10, "type": "linear"},
-                {"name": "h1", "dim": 20, "type": "linear", "activation": {"type": "relu"}},
-                {"name": "h2", "dim": 15, "type": "linear", "activation": {"type": "relu"}},
-                {"name": "output", "dim": 5, "type": "linear"},
+                {"name": "input", "shape": (10,), "type": "linear"},
+                {"name": "h1", "shape": (20,), "type": "linear", "activation": {"type": "relu"}},
+                {"name": "h2", "shape": (15,), "type": "linear", "activation": {"type": "relu"}},
+                {"name": "output", "shape": (5,), "type": "linear"},
             ],
             "edge_list": [
                 {"source_name": "input", "target_name": "h1", "slot": "in"},
@@ -312,10 +313,10 @@ class TestComplexGraphs:
         """Test node with multiple inputs from different sources."""
         config = {
             "node_list": [
-                {"name": "a", "dim": 5, "type": "linear"},
-                {"name": "b", "dim": 4, "type": "linear"},
-                {"name": "c", "dim": 3, "type": "linear"},
-                {"name": "merger", "dim": 6, "type": "linear"},
+                {"name": "a", "shape": (5,), "type": "linear"},
+                {"name": "b", "shape": (4,), "type": "linear"},
+                {"name": "c", "shape": (3,), "type": "linear"},
+                {"name": "merger", "shape": (6,), "type": "linear"},
             ],
             "edge_list": [
                 {"source_name": "a", "target_name": "merger", "slot": "in"},
@@ -344,9 +345,9 @@ class TestEnergyDynamics:
     def energy_test_config(self):
         return {
             "node_list": [
-                {"name": "x", "dim": 5, "type": "linear"},
-                {"name": "h", "dim": 10, "type": "linear", "activation": {"type": "tanh"}},
-                {"name": "y", "dim": 3, "type": "linear"},
+                {"name": "x", "shape": (5,), "type": "linear"},
+                {"name": "h", "shape": (10,), "type": "linear", "activation": {"type": "tanh"}},
+                {"name": "y", "shape": (3,), "type": "linear"},
             ],
             "edge_list": [
                 {"source_name": "x", "target_name": "h", "slot": "in"},
@@ -394,8 +395,8 @@ def test_different_node_types(node_type):
     """Test graph construction with different node types."""
     config = {
         "node_list": [
-            {"name": "a", "dim": 4, "type": node_type},
-            {"name": "b", "dim": 3, "type": node_type},
+            {"name": "a", "shape": (4,), "type": node_type},
+            {"name": "b", "shape": (3,), "type": node_type},
         ],
         "edge_list": [
             {"source_name": "a", "target_name": "b", "slot": "in"},
@@ -415,8 +416,8 @@ def test_various_batch_sizes(batch_size):
     """Test that the system works with various batch sizes."""
     config = {
         "node_list": [
-            {"name": "input", "dim": 5, "type": "linear"},
-            {"name": "output", "dim": 3, "type": "linear"},
+            {"name": "input", "shape": (5,), "type": "linear"},
+            {"name": "output", "shape": (3,), "type": "linear"},
         ],
         "edge_list": [
             {"source_name": "input", "target_name": "output", "slot": "in"},

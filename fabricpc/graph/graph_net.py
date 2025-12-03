@@ -102,7 +102,7 @@ def build_graph_structure(config: dict) -> GraphStructure:
         "node_list": [
             {
                 "name": "x",
-                "dim": 784,
+                "shape": (784,),
                 "type": "linear",
                 "activation": {"type": "identity"},
                 "weight_init": {"type": "normal", "std": 0.05}  # Optional
@@ -175,7 +175,12 @@ def build_graph_structure(config: dict) -> GraphStructure:
 
     for node_config in node_list:
         name = node_config["name"]
-        dim = node_config["dim"]
+
+        # Parse shape from config (required)
+        if "shape" not in node_config:
+            raise ValueError(f"Node '{name}' must have 'shape' specified as a tuple, e.g., shape=(128,)")
+        shape = tuple(node_config["shape"])
+
         node_type = node_config.get("type", "linear").lower()
         activation_config = node_config.get("activation", {"type": "identity"})
 
@@ -195,7 +200,7 @@ def build_graph_structure(config: dict) -> GraphStructure:
         # Construct the node object
         nodes[name] = NodeInfo(
             name=name,
-            dim=dim,
+            shape=shape,
             node_type=node_type,
             node_config=node_config,
             activation_config=activation_config,
@@ -295,19 +300,18 @@ def initialize_params(
         # Get node class
         node_class = get_node_class_from_type(node_info.node_type)
 
-        # Get the input dimensions for each edge
-        input_dims = {}
+        # Get the input shapes for each edge (full shapes for conv support)
+        input_shapes = {}
         for edge_key in node_info.in_edges:
             edge_info = structure.edges[edge_key]
             source_node = structure.nodes[edge_info.source]
-            total_dim = source_node.dim
-            input_dims[edge_key] = total_dim
+            input_shapes[edge_key] = source_node.shape
 
         # Initialize parameters of the node
         params_obj = node_class.initialize_params(
             keys[key_idx],
-            node_info.dim,
-            input_dims,
+            node_info.shape,
+            input_shapes,
             node_info.node_config
         )
         key_idx += 1
@@ -355,7 +359,7 @@ def initialize_state(
 
     # Initialize all nodes, respecting clamps
     for node_name, node_info in structure.nodes.items():
-        shape = (batch_size, node_info.dim)
+        shape = (batch_size, *node_info.shape)
 
         # Initialize z_latent
         if node_name in clamps:
@@ -462,20 +466,20 @@ def create_pc_graph(
         ...     "node_list": [
         ...         {
         ...             "name": "pixels",
-        ...             "dim": 784,
+        ...             "shape": (784,),
         ...             "type": "linear",
         ...             "activation": {"type": "identity"},
         ...             "weight_init": {"type": "xavier"}
         ...         },
         ...         {
         ...             "name": "hidden",
-        ...             "dim": 256,
+        ...             "shape": (256,),
         ...             "type": "linear",
         ...             "activation": {"type": "relu"}
         ...         },
         ...         {
         ...             "name": "class",
-        ...             "dim": 10,
+        ...             "shape": (10,),
         ...             "type": "linear",
         ...             "activation": {"type": "softmax"}
         ...         },

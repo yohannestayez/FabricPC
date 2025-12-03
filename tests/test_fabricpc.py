@@ -16,6 +16,7 @@ os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.9")
 os.environ.setdefault("JAX_TRACEBACK_FILTERING", "off")  # set filtering to "off" for better error messages in traceback
 
+import numpy as np
 import pytest
 import jax
 import jax.numpy as jnp
@@ -44,26 +45,26 @@ def sample_config():
         "node_list": [
             {
                 "name": "input",
-                "dim": 10,
+                "shape": (10,),
                 "type": "linear",
                 "activation": {"type": "identity"},
             },
             {
                 "name": "hidden1",
-                "dim": 20,
+                "shape": (20,),
                 "type": "linear",
                 "activation": {"type": "relu"},
                 "weight_init": {"type": "xavier"},
             },
             {
                 "name": "hidden2",
-                "dim": 15,
+                "shape": (15,),
                 "type": "linear",
                 "activation": {"type": "tanh"},
             },
             {
                 "name": "output",
-                "dim": 5,
+                "shape": (5,),
                 "type": "linear",
                 "activation": {"type": "sigmoid"},
             },
@@ -118,8 +119,8 @@ class TestGraphConstruction:
         """Test that invalid slot connections are rejected."""
         config = {
             "node_list": [
-                {"name": "a", "dim": 10, "type": "linear"},
-                {"name": "b", "dim": 5, "type": "linear"},
+                {"name": "a", "shape": (10,), "type": "linear"},
+                {"name": "b", "shape": (5,), "type": "linear"},
             ],
             "edge_list": [
                 {"source_name": "a", "target_name": "b", "slot": "invalid_slot"},
@@ -139,15 +140,15 @@ class TestInference:
         """Prepare data for inference tests."""
         params, structure = graph
         batch_size = 32
-        input_dim = structure.nodes["input"].dim
-        output_dim = structure.nodes["output"].dim
+        input_shape = structure.nodes["input"].shape
+        output_shape = structure.nodes["output"].shape
 
         # Split rng_key for data generation and state initialization
         rng_key, x_key, y_key, state_key = jax.random.split(rng_key, 4)
 
-        # Create dummy data
-        x_data = jax.random.normal(x_key, (batch_size, input_dim))
-        y_data = jax.random.normal(y_key, (batch_size, output_dim))
+        # Create dummy data with full shape (batch, *shape)
+        x_data = jax.random.normal(x_key, (batch_size, *input_shape))
+        y_data = jax.random.normal(y_key, (batch_size, *output_shape))
 
         # Create clamps
         clamps = {
@@ -258,16 +259,16 @@ class TestTraining:
         """Test a complete training step with local learning."""
         params, structure = graph
         batch_size = 8
-        input_dim = structure.nodes["input"].dim
-        output_dim = structure.nodes["output"].dim
+        input_shape = structure.nodes["input"].shape
+        output_shape = structure.nodes["output"].shape
 
         # Split rng_key for data generation
         rng_key, x_key, y_key = jax.random.split(rng_key, 3)
 
-        # Create dummy batch
+        # Create dummy batch with full shape (batch, *shape)
         batch = {
-            "x": jax.random.normal(x_key, (batch_size, input_dim)),
-            "y": jax.random.normal(y_key, (batch_size, output_dim)),
+            "x": jax.random.normal(x_key, (batch_size, *input_shape)),
+            "y": jax.random.normal(y_key, (batch_size, *output_shape)),
         }
 
         # Create optimizer
@@ -307,17 +308,18 @@ class TestForwardMethods:
         node_names = list(structure.nodes.keys())
         node_keys = jax.random.split(rng_key, len(node_names))
 
-        # Create dummy latent states
+        # Create dummy latent states with full shapes (batch, *shape)
         nodes = {}
         for i, (node_name, node_info) in enumerate(structure.nodes.items()):
+            full_shape = (batch_size, *node_info.shape)
             nodes[node_name] = NodeState(
-                z_latent=jax.random.normal(node_keys[i], (batch_size, node_info.dim)),
-                latent_grad=jnp.zeros((batch_size, node_info.dim)),
-                z_mu=jnp.zeros((batch_size, node_info.dim)),
-                error=jnp.zeros((batch_size, node_info.dim)),
+                z_latent=jax.random.normal(node_keys[i], full_shape),
+                latent_grad=jnp.zeros(full_shape),
+                z_mu=jnp.zeros(full_shape),
+                error=jnp.zeros(full_shape),
                 energy=jnp.zeros((batch_size,)),
-                pre_activation=jnp.zeros((batch_size, node_info.dim)),
-                gain_mod_error=jnp.zeros((batch_size, node_info.dim)),
+                pre_activation=jnp.zeros(full_shape),
+                gain_mod_error=jnp.zeros(full_shape),
                 substructure={}
             )
 
@@ -355,8 +357,8 @@ class TestForwardMethods:
                 # Verify input gradient shapes
                 for edge_key in node_info.in_edges:
                     edge_info = structure.edges[edge_key]
-                    source_dim = structure.nodes[edge_info.source].dim
-                    expected_shape = (state.batch_size, source_dim)
+                    source_shape = structure.nodes[edge_info.source].shape
+                    expected_shape = (state.batch_size, *source_shape)
                     assert input_grads[edge_key].shape == expected_shape, \
                         f"Input gradient shape mismatch for {edge_key}"
 
@@ -396,9 +398,9 @@ def test_different_activations(activation_type, rng_key):
     """Test graph construction with different activation functions."""
     config = {
         "node_list": [
-            {"name": "input", "dim": 10, "type": "linear", "activation": {"type": "identity"}},
-            {"name": "hidden", "dim": 20, "type": "linear", "activation": {"type": activation_type}},
-            {"name": "output", "dim": 5, "type": "linear", "activation": {"type": "identity"}},
+            {"name": "input", "shape": (10,), "type": "linear", "activation": {"type": "identity"}},
+            {"name": "hidden", "shape": (20,), "type": "linear", "activation": {"type": activation_type}},
+            {"name": "output", "shape": (5,), "type": "linear", "activation": {"type": "identity"}},
         ],
         "edge_list": [
             {"source_name": "input", "target_name": "hidden", "slot": "in"},
@@ -416,14 +418,14 @@ def test_different_weight_initializations(weight_init_type, rng_key):
     """Test graph construction with different weight initialization methods."""
     config = {
         "node_list": [
-            {"name": "input", "dim": 10, "type": "linear"},
+            {"name": "input", "shape": (10,), "type": "linear"},
             {
                 "name": "hidden",
-                "dim": 20,
+                "shape": (20,),
                 "type": "linear",
                 "weight_init": {"type": weight_init_type}
             },
-            {"name": "output", "dim": 5, "type": "linear"},
+            {"name": "output", "shape": (5,), "type": "linear"},
         ],
         "edge_list": [
             {"source_name": "input", "target_name": "hidden", "slot": "in"},
