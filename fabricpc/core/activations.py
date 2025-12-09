@@ -307,6 +307,40 @@ class LeakyReLUActivation(ActivationBase):
         alpha = config.get("alpha", 0.01) if config else 0.01
         return jnp.where(x > 0, 1.0, alpha)
 
+@register_activation("gelu")
+class GeluActivation(ActivationBase):
+    """GELU activation: x * 0.5 * (1 + erf(x / sqrt(2)))"""
+
+    CONFIG_SCHEMA = {}
+
+    @staticmethod
+    def forward(x: jnp.ndarray, config: Dict[str, Any] = None) -> jnp.ndarray:
+        return nn.gelu(x)
+
+    @staticmethod
+    def derivative(x: jnp.ndarray, config: Dict[str, Any] = None) -> jnp.ndarray:
+        # Gelu(x): = x * normal_CDF
+        sqrt_2_over_pi = jnp.sqrt(2 / jnp.pi)
+        x_cubed = x ** 3
+        apx_norm_cdf = 0.5 * (1 + jnp.tanh(sqrt_2_over_pi * (x + 0.044715 * x_cubed)))  # Approximation of normal CDF via tanh
+        norm_cdf_prime = (0.5 * sqrt_2_over_pi * (1 + 3 * 0.044715 * x ** 2)) * (1 - jnp.tanh(sqrt_2_over_pi * (x + 0.044715 * x_cubed)) ** 2)
+        return apx_norm_cdf + x * norm_cdf_prime
+
+@register_activation("softmax")
+class SoftmaxActivation(ActivationBase):
+    """Softmax activation: exp(x) / sum(exp(x)) along the last axis"""
+
+    CONFIG_SCHEMA = {}
+
+    @staticmethod
+    def forward(x: jnp.ndarray, config: Dict[str, Any] = None) -> jnp.ndarray:
+        exp_x = jnp.exp(x - jnp.max(x, axis=-1, keepdims=True))  # relative to max value for numerical stability
+        return exp_x / jnp.sum(exp_x, axis=-1, keepdims=True)
+
+    @staticmethod
+    def derivative(x: jnp.ndarray, config: Dict[str, Any] = None) -> jnp.ndarray:
+        s = SoftmaxActivation.forward(x)
+        return s * (1 - s)  # Note: This is a simplification; full Jacobian is more complex
 
 @register_activation("hard_tanh")
 class HardTanhActivation(ActivationBase):

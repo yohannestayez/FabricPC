@@ -27,6 +27,7 @@ from fabricpc.nodes.registry import (
 
 # Import node modules to trigger @register_node decorators
 from fabricpc.nodes.linear import LinearNode, LinearExplicitGrad
+from fabricpc.nodes.transformer import TransformerBlockNode
 
 # Discover external nodes from installed packages
 discover_external_nodes()
@@ -49,4 +50,5 @@ __all__ = [
     # Built-in nodes
     "LinearNode",
     "LinearExplicitGrad",
+    "TransformerBlockNode",
 ]

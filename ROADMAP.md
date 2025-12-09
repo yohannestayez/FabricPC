@@ -143,8 +143,9 @@ class LayerNormNode(NodeBase):
         return {"in": SlotSpec(name="in", is_multi_input=False)}
 
     @staticmethod
-    def initialize_params(key, node_dim, input_dims, config):
+    def initialize_params(key, node_shape, input_shapes, config):
         eps = config.get("eps", 1e-5)
+        node_dim = int(jnp.prod(jnp.array(node_shape)))
         return NodeParams(
             weights={"gamma": jnp.ones((1, node_dim))},
             biases={"beta": jnp.zeros((1, node_dim))}
@@ -175,7 +176,6 @@ class LayerNormNode(NodeBase):
             pre_activation=pre_activation,
             error=error,
             energy=energy,
-            gain_mod_error=error,  # identity activation derivative = 1
             substructure={"mean": mean, "var": var, "x_norm": x_norm}
         )
 
@@ -203,7 +203,8 @@ class BatchNormNode(NodeBase):
         return {"in": SlotSpec(name="in", is_multi_input=False)}
 
     @staticmethod
-    def initialize_params(key, node_dim, input_dims, config):
+    def initialize_params(key, node_shape, input_shapes, config):
+        node_dim = int(jnp.prod(jnp.array(node_shape)))
         return NodeParams(
             weights={
                 "gamma": jnp.ones((1, node_dim)),
@@ -265,7 +266,6 @@ class SoftmaxNode(NodeBase):
             pre_activation=pre_activation,
             error=error,
             energy=energy,
-            gain_mod_error=gain_mod_error,
             substructure={}
         )
 
@@ -295,10 +295,10 @@ class Conv2DNode(NodeBase):
         return {"in": SlotSpec(name="in", is_multi_input=True)}
 
     @staticmethod
-    def initialize_params(key, node_dim, input_dims, config):
+    def initialize_params(key, node_shape, input_shapes, config):
         kernel_size = config.get("kernel_size", (3, 3))
-        in_channels = config.get("in_channels", sum(input_dims.values()))
-        out_channels = config.get("out_channels", node_dim)
+        in_channels = config.get("in_channels", sum(s[-1] for s in input_shapes.values()))
+        out_channels = config.get("out_channels", node_shape[-1])
 
         # Xavier initialization for conv kernels
         fan_in = in_channels * kernel_size[0] * kernel_size[1]
@@ -336,7 +336,7 @@ class Conv2DNode(NodeBase):
             pre_activation = pre_activation + params.biases["b"]
 
         # Apply activation
-        activation_fn, activation_deriv = get_activation(node_info.activation_config)
+        activation_fn, activation_deriv = get_activation(node_info.node_config["activation"])
         z_mu = activation_fn(pre_activation)
 
         # Compute error and energy
@@ -348,7 +348,6 @@ class Conv2DNode(NodeBase):
             pre_activation=pre_activation,
             error=error,
             energy=energy,
-            gain_mod_error=gain_mod_error,
             substructure={}
         )
 
@@ -399,9 +398,9 @@ class MultiHeadAttentionNode(NodeBase):
         }
 
     @staticmethod
-    def initialize_params(key, node_dim, input_dims, config):
+    def initialize_params(key, node_shape, input_shapes, config):
         num_heads = config.get("num_heads", 8)
-        embed_dim = node_dim
+        embed_dim = node_shape[-1]  # Last dimension is embed_dim
         head_dim = embed_dim // num_heads
 
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -465,7 +464,7 @@ class MultiHeadAttentionNode(NodeBase):
         pre_activation = jnp.matmul(attn_output, params.weights["W_o"]) + params.biases["b_o"]
 
         # Apply activation (typically identity for attention output)
-        activation_fn, activation_deriv = get_activation(node_info.activation_config)
+        activation_fn, activation_deriv = get_activation(node_info.node_config["activation"])
         z_mu = activation_fn(pre_activation)
 
         # Compute error and energy
@@ -483,7 +482,6 @@ class MultiHeadAttentionNode(NodeBase):
             pre_activation=pre_activation,
             error=error,
             energy=energy,
-            gain_mod_error=gain_mod_error,
             substructure=substructure
         )
 
@@ -513,10 +511,10 @@ class TransformerBlockNode(NodeBase):
         return {"in": SlotSpec(name="in", is_multi_input=False)}
 
     @staticmethod
-    def initialize_params(key, node_dim, input_dims, config):
+    def initialize_params(key, node_shape, input_shapes, config):
         num_heads = config.get("num_heads", 8)
-        ffn_dim = config.get("ffn_dim", node_dim * 4)
-        embed_dim = node_dim
+        embed_dim = node_shape[-1]  # Last dimension is embed_dim
+        ffn_dim = config.get("ffn_dim")
 
         keys = jax.random.split(key, 8)
         std = 1.0 / jnp.sqrt(embed_dim)
@@ -951,10 +949,11 @@ class HyperNode(NodeBase):
         }
 
     @staticmethod
-    def initialize_params(key, node_dim, input_dims, config):
+    def initialize_params(key, node_shape, input_shapes, config):
         """
         Initialize both the hypernode's own parameters and its subgraph.
         """
+        import numpy as np
         from fabricpc.graph.graph_net import create_pc_graph
 
         subgraph_config = config["subgraph_config"]
@@ -966,12 +965,14 @@ class HyperNode(NodeBase):
         )
 
         # Boundary transformation weights (optional)
-        # Maps from external input dim to subgraph input dim
+        # Maps from external input shape to subgraph input shape
         boundary_weights = {}
-        for slot_name, ext_dim in input_dims.items():
+        for slot_name, ext_shape in input_shapes.items():
             internal_input = config["input_mapping"].get(slot_name)
             if internal_input:
-                int_dim = subgraph_structure.nodes[internal_input].dim
+                ext_dim = int(np.prod(ext_shape))
+                int_shape = subgraph_structure.nodes[internal_input].shape
+                int_dim = int(np.prod(int_shape))
                 key_boundary, subkey = jax.random.split(key_boundary)
                 boundary_weights[f"boundary_{slot_name}"] = (
                     jax.random.normal(subkey, (ext_dim, int_dim)) * 0.01
@@ -1036,7 +1037,6 @@ class HyperNode(NodeBase):
             pre_activation=z_mu,
             error=error,
             energy=energy,
-            gain_mod_error=error,  # identity activation
             substructure={"_subgraph_state": subgraph_state}
         )
 
@@ -1436,7 +1436,7 @@ def create_pc_transformer(
     vocab_size: int,
     embed_dim: int = 256,
     num_heads: int = 8,
-    num_layers: int = 4,
+    num_blocks: int = 4,
     num_classes: int = 2,
     max_seq_len: int = 512,
 ):
@@ -1454,7 +1454,7 @@ def create_pc_transformer(
 
     # Transformer layers
     prev_layer = "embedding"
-    for i in range(num_layers):
+    for i in range(num_blocks):
         layer_name = f"transformer_{i}"
         net.add_node(layer_name, dim=embed_dim, node_type="transformer_block",
                     num_heads=num_heads, ffn_dim=embed_dim * 4)
@@ -1489,7 +1489,7 @@ if __name__ == "__main__":
         vocab_size=len(vocab),
         embed_dim=256,
         num_heads=8,
-        num_layers=4,
+        num_blocks=4,
         num_classes=2,
     )
     model.init(jax.random.PRNGKey(42))

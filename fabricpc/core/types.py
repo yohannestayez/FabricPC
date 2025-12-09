@@ -143,7 +143,6 @@ class NodeState(NamedTuple):
         energy: Energy
         pre_activation: Pre-activation values (before activation function)
         latent_grad: Gradients w.r.t. latent states for inference updates
-        gain_mod_error: Gain-modulated errors (error * activation_derivative)
         substructure: Dictionary of node internal states for complex nodes
     """
 
@@ -153,7 +152,6 @@ class NodeState(NamedTuple):
     energy: jnp.ndarray  # per-sample energy, shape (batch_size,)
     pre_activation: jnp.ndarray
     latent_grad: jnp.ndarray  # For local gradient accumulation
-    gain_mod_error: jnp.ndarray  # gain modulated error per node, for gradient computation
     substructure: Dict[str, jnp.ndarray]  # substructure of node internal states
 
 class GraphState(NamedTuple):
@@ -348,7 +346,7 @@ tree_util.register_pytree_node(
 tree_util.register_pytree_node(
     NodeState,
     lambda ns: (
-        (ns.z_latent, ns.z_mu, ns.error, ns.energy, ns.pre_activation, ns.latent_grad, ns.gain_mod_error, ns.substructure),
+        (ns.z_latent, ns.z_mu, ns.error, ns.energy, ns.pre_activation, ns.latent_grad, ns.substructure),
         None,
     ),
     lambda aux, children: NodeState(*children),

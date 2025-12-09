@@ -319,7 +319,6 @@ class TestForwardMethods:
                 error=jnp.zeros(full_shape),
                 energy=jnp.zeros((batch_size,)),
                 pre_activation=jnp.zeros(full_shape),
-                gain_mod_error=jnp.zeros(full_shape),
                 substructure={}
             )
 

@@ -89,7 +89,7 @@ def inference_step(
     #     for node_name in structure.nodes:
     #         node_state = state.nodes[node_name]
     #         node_info = structure.nodes[node_name]
-    #         _, act_deriv = get_activation(node_info.activation_config)
+    #         _, act_deriv = get_activation(node_info.node_config["activation"])
     #         latent_grad = state.nodes[node_name].latent_grad
     #         latent_grad = latent_grad * act_deriv(node_state.pre_activation)
     #         # Update the state with new latent gradients
@@ -106,6 +106,10 @@ def inference_step(
             new_z_latent = node_state.z_latent - eta_infer * node_state.latent_grad
         # Update state
         state = update_node_in_state(state, node_name, z_latent=new_z_latent)
+
+    for node_name in structure.nodes:
+        # Reset substructure
+        state = update_node_in_state(state, node_name, substructure={})
 
     return state
 

@@ -157,7 +157,6 @@ class LinearNode(FlattenInputMixin, NodeBase):
             z_mu = state.z_latent  # prediction is the latent state itself
             pre_activation = jnp.zeros_like(state.z_latent)
             error = jnp.zeros_like(state.z_latent)
-            gain_mod_error = jnp.zeros_like(state.z_latent)
         else:
             # Linear transformation using mixin
             pre_activation = FlattenInputMixin.compute_linear(
@@ -169,22 +168,17 @@ class LinearNode(FlattenInputMixin, NodeBase):
                 pre_activation = pre_activation + params.biases["b"]
 
             # Apply activation function
-            activation_fn, activation_deriv = get_activation(node_info.node_config["activation"])
+            activation_fn, _ = get_activation(node_info.node_config["activation"])
             z_mu = activation_fn(pre_activation)
 
             # Error
             error = state.z_latent - z_mu
 
-            # Gain-modulated error (use newly computed pre_activation, not state.pre_activation)
-            f_prime = activation_deriv(pre_activation)  # shape (batch_size, *out_shape)
-            gain_mod_error = error * f_prime  # element-wise multiplication
-
         # Update node state
         state = state._replace(
             pre_activation=pre_activation,
             z_mu=z_mu,
-            error=error,
-            gain_mod_error=gain_mod_error)
+            error=error)
 
         # Compute energy, accumulate the self-latent gradient
         state = node_class.energy_functional(state, node_info)
@@ -238,6 +232,9 @@ class LinearExplicitGrad(LinearNode):
         _, state = node_class.forward(params, inputs, state, node_info)
         # Note: the self-latent gradient is accumulated in state.latent_grad by the forward method
 
+        # Gain-modulated error computation
+        state = node_class.compute_gain_mod_error(state, node_info)
+
         # Determine the energy functional to use for the node from its config
         energy_functional = node_info.node_config.get("energy", {}).get("type", None)
         latent_is_preactivation = node_info.node_config.get("latent_type") == "preactivation"
@@ -257,7 +254,7 @@ class LinearExplicitGrad(LinearNode):
                     # weights{s->t} (dim_src, dim_tgt)
                 else:
                     # Flatten gain_mod_error and compute gradient in flat space
-                    gain_mod_error_flat = FlattenInputMixin.flatten_input(state.gain_mod_error)
+                    gain_mod_error_flat = FlattenInputMixin.flatten_input(state.substructure["gain_mod_error"])
                     grad_flat = -jnp.matmul(gain_mod_error_flat, params.weights[edge_key].T)
                     grad_contribution = FlattenInputMixin.reshape_output(grad_flat, source_shape)
             else:
@@ -298,11 +295,14 @@ class LinearExplicitGrad(LinearNode):
         # Forward pass to get new state
         _, state = node_class.forward(params, inputs, state, node_info)
 
+        # Gain-modulated error computation
+        state = node_class.compute_gain_mod_error(state, node_info)
+
         weight_grads = {}
         bias_grads = {}
 
         # Flatten gain_mod_error using mixin
-        gain_mod_error_flat = FlattenInputMixin.flatten_input(state.gain_mod_error)
+        gain_mod_error_flat = FlattenInputMixin.flatten_input(state.substructure["gain_mod_error"])
 
         # Weight gradient
         for edge_key, in_tensor in inputs.items():
@@ -314,7 +314,28 @@ class LinearExplicitGrad(LinearNode):
         # Bias gradient - sum over batch, keep shape (1, *out_shape)
         if "b" in params.biases:
             # Sum over batch (axis=0), keepdims to get (1, *out_shape)
-            grad_b = -jnp.sum(state.gain_mod_error, axis=0, keepdims=True)
+            grad_b = -jnp.sum(state.substructure["gain_mod_error"], axis=0, keepdims=True)
             bias_grads["b"] = grad_b
 
         return state, NodeParams(weights=weight_grads, biases=bias_grads)
+
+    @staticmethod
+    def compute_gain_mod_error(
+        state: NodeState,
+        node_info: NodeInfo
+    ) -> NodeState:
+        """
+        Compute gain-modulated error for this node.
+
+        Args:
+            state: NodeState containing current error and pre_activation
+            node_info: NodeInfo object
+        """
+        _, activation_deriv = get_activation(node_info.node_config["activation"])
+
+        # Gain-modulated error computation
+        f_prime = activation_deriv(state.pre_activation)  # shape (batch_size, *out_shape)
+        gain_mod_error = state.error * f_prime  # element-wise multiplication
+
+        state = state._replace(substructure={"gain_mod_error": gain_mod_error})
+        return state

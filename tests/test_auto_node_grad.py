@@ -92,6 +92,9 @@ class TestLinearAutoGradNode:
             in_edges=(edge_key,),
             out_edges=(),
         )
+        # Override node_type for autograd version
+        info_fields = node_info.__dict__.copy()
+        node_info_explicit = NodeInfo(**{**info_fields, "node_type": "linear_explicit_grad"})
 
         # Create initial node state with random latent
         z_latent = jax.random.normal(rngkey_latent, (batch_size, output_dim))
@@ -102,13 +105,12 @@ class TestLinearAutoGradNode:
             error=jnp.zeros((batch_size, output_dim)),
             energy=jnp.zeros((batch_size,)),
             pre_activation=jnp.zeros((batch_size, output_dim)),
-            gain_mod_error=jnp.zeros((batch_size, output_dim)),
             substructure={},
         )
 
         # Compare forward_inference results
         state_linear, grads_linear = LinearNode.forward_inference(params, inputs, node_state, node_info)
-        state_autograd, grads_autograd = LinearExplicitGrad.forward_inference(params, inputs, node_state, node_info)
+        state_autograd, grads_autograd = LinearExplicitGrad.forward_inference(params, inputs, node_state, node_info_explicit)
 
         # Compare input gradients
         for edge_key in grads_linear:
@@ -149,6 +151,9 @@ class TestLinearAutoGradNode:
             in_edges=(edge_key,),
             out_edges=(),
         )
+        # Override node_type for autograd version
+        info_fields = node_info.__dict__.copy()
+        node_info_explicit = NodeInfo(**{**info_fields, "node_type": "linear_explicit_grad"})
 
         # Create initial node state with random latent
         z_latent = jax.random.normal(rngkey_latent, (batch_size, output_dim))
@@ -159,13 +164,12 @@ class TestLinearAutoGradNode:
             error=jnp.zeros((batch_size, output_dim)),
             energy=jnp.zeros((batch_size,)),
             pre_activation=jnp.zeros((batch_size, output_dim)),
-            gain_mod_error=jnp.zeros((batch_size, output_dim)),
             substructure={},
         )
 
         # Compare forward_learning results
         state_linear, grads_linear = LinearNode.forward_learning(params, inputs, node_state, node_info)
-        state_autograd, grads_autograd = LinearExplicitGrad.forward_learning(params, inputs, node_state, node_info)
+        state_autograd, grads_autograd = LinearExplicitGrad.forward_learning(params, inputs, node_state, node_info_explicit)
 
         # Compare weight gradients
         for edge_key in grads_linear.weights:
@@ -220,6 +224,9 @@ class TestLinearAutoGradNode:
         # Compare gradients for each non-input node using forward_inference
         for node_name in ["hidden", "output"]:
             node_info = structure_linear.nodes[node_name]
+            # Override node_type for autograd version
+            info_fields = node_info.__dict__.copy()
+            node_info_explicit = NodeInfo(**{**info_fields, "node_type": "linear_explicit_grad"})
 
             # Gather inputs for gradient computation
             inputs = gather_inputs(node_info, structure_linear, state_linear)
@@ -235,7 +242,7 @@ class TestLinearAutoGradNode:
                 params_autograd.nodes[node_name],
                 inputs,
                 state_autograd.nodes[node_name],
-                node_info
+                node_info_explicit
             )
 
             # Compare
@@ -243,7 +250,6 @@ class TestLinearAutoGradNode:
                 max_diff = jnp.max(jnp.abs(grads_linear[edge_key] - grads_autograd[edge_key]))
                 assert max_diff < grad_tolerance, \
                     f"Input gradient mismatch at {node_name} for {edge_key}: max diff = {max_diff}"
-
 
 class TestLinearAutoGradNodeRegistration:
     """Test that LinearExplicitGrad is properly registered."""

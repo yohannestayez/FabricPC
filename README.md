@@ -44,10 +44,14 @@ python examples/mnist_demo.py
 
 ## Contributions
 Contributions are welcome! Please open issues or pull requests on the GitHub repository.
+- Develop on a branch using convention "feature/your_feature_name"
+- All demos must match baseline results and test suites must pass before merging new code.
+- Write unit tests and docstrings for new code
+- Follow PEP8 style guidelines
 
-This is a research-first project. APIs may change frequently until v1.0 release. Any breaking changes are documented in the changelog.
-
-All demos must match baseline results and test suites must pass before merging new code.
+This is a research-first project.
+- APIs may change frequently until v1.0 release.
+- Any breaking changes are documented in the changelog.
 
 ## License: private until officially released. Please do not distribute.
 
