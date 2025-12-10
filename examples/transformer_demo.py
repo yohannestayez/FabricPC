@@ -208,7 +208,7 @@ def create_transformer_config(
         "shape": (seq_len, vocab_size),
         "type": "linear",
         "activation": {"type": "softmax"},
-        "energy": {"type": "cross_entropy"},
+        "energy": {"type": "gaussian"},
         "weight_init": {"type": "kaiming", "mode": "fan_out"},
     })
     edge_list.append({"source_name": prev_name, "target_name": "output", "slot": "in"})
@@ -297,10 +297,12 @@ def generate_text(
     for i, prompt in enumerate(prompts):
         # Get the tokens for this batch element
         tokens = np.array(generated_tokens[i])
+
         # Decode only the non-padded part (skip initial padding)
         pad_len = seq_len - len(prompt)
         if pad_len > 0:
             tokens = tokens[pad_len:]
+
         text = dataset.decode(tokens)
         generated_texts.append(text)
 
@@ -318,11 +320,11 @@ def main():
     print("=" * 70)
 
     # Configuration
-    SEQ_LEN = 128        # Sequence length
-    EMBED_DIM = 64     # Embedding dimension
+    SEQ_LEN = 64        # Sequence length
+    EMBED_DIM = 16     # Embedding dimension
     NUM_HEADS = 8       # Attention heads
-    NUM_BLOCKS = 3      # Transformer blocks
-    FF_DIM = 256        # Feedforward hidden dimension
+    NUM_BLOCKS = 1      # Transformer blocks
+    FF_DIM = 64        # Feedforward hidden dimension
     BATCH_SIZE = 128     # Batch size
     NUM_EPOCHS = 5      # Training epochs
     INFER_STEPS = 10    # Inference iterations per step
@@ -339,6 +341,7 @@ def main():
 
     # Use a subset for faster training (first 100k characters)
     dataset_cutoff_len = 100000
+    print(f"Using first {dataset_cutoff_len} of {len(text)} total characters for training...")
     text = text[:dataset_cutoff_len]
     dataset = CharDataset(text, seq_len=SEQ_LEN)
 
@@ -391,6 +394,10 @@ def main():
     # Generate samples
     print("\n[4/5] Generating sample text...")
     prompts = [
+        "Know, Rome, that",
+        "MENENIUS:",
+        "the more virtuous",
+        "by his looks",
         "ROMEO: ",
         "To be or not to be",
         "The king",

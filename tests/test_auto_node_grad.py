@@ -13,12 +13,34 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-from fabricpc.core.types import NodeState, NodeParams, NodeInfo, EdgeInfo, GraphStructure
+from fabricpc.core.types import NodeState, NodeParams, NodeInfo
 from fabricpc.graph.graph_net import create_pc_graph, initialize_state
 from fabricpc.core.inference import run_inference, gather_inputs
-from fabricpc.nodes import get_node_class, LinearNode, LinearExplicitGrad
+from fabricpc.nodes import get_node_class, LinearNode, LinearExplicitGrad, validate_node_config
 
 jax.config.update("jax_platform_name", "cpu")  # using cuda causes larger numerical differences because of TF32 precision
+
+
+def make_node_config(node_type: str, activation: str) -> dict:
+    """
+    Create a properly validated node config with all defaults from the schema.
+
+    Uses validate_node_config to ensure all defaults (e.g., flatten_input, use_bias)
+    are populated from the node class's CONFIG_SCHEMA. Also resolves energy and
+    activation configs using the node class's default resolvers.
+    """
+    node_class = get_node_class(node_type)
+    raw_config = {
+        "name": "test_node",
+        "shape": (1,),  # placeholder, will be overridden
+        "type": node_type,
+        "activation": {"type": activation},
+    }
+    validated_config = validate_node_config(node_class, raw_config)
+    # Resolve energy and activation configs (normally done by from_config)
+    validated_config["energy"] = node_class._resolve_energy_config(raw_config)
+    validated_config["activation"] = node_class._resolve_activation_config(raw_config)
+    return validated_config
 
 
 @pytest.fixture
@@ -81,11 +103,13 @@ class TestLinearAutoGradNode:
         )
         inputs = {edge_key: jax.random.normal(rngkey_inputs, (batch_size, input_dim))}
 
+        # Create validated node_config with all defaults from schema
+        validated_config = make_node_config("linear", activation)
         node_info = NodeInfo(
             name="dst",
             shape=(output_dim,),
             node_type="linear",
-            node_config={"activation": {"type": activation}, "energy": {"type": "gaussian"}},
+            node_config=validated_config,
             slots={},
             in_degree=1,
             out_degree=0,
@@ -93,8 +117,18 @@ class TestLinearAutoGradNode:
             out_edges=(),
         )
         # Override node_type for autograd version
-        info_fields = node_info.__dict__.copy()
-        node_info_explicit = NodeInfo(**{**info_fields, "node_type": "linear_explicit_grad"})
+        validated_config_explicit = make_node_config("linear_explicit_grad", activation)
+        node_info_explicit = NodeInfo(
+            name="dst",
+            shape=(output_dim,),
+            node_type="linear_explicit_grad",
+            node_config=validated_config_explicit,
+            slots={},
+            in_degree=1,
+            out_degree=0,
+            in_edges=(edge_key,),
+            out_edges=(),
+        )
 
         # Create initial node state with random latent
         z_latent = jax.random.normal(rngkey_latent, (batch_size, output_dim))
@@ -140,11 +174,13 @@ class TestLinearAutoGradNode:
         )
         inputs = {edge_key: jax.random.normal(rngkey_inputs, (batch_size, input_dim))}
 
+        # Create validated node_config with all defaults from schema
+        validated_config = make_node_config("linear", activation)
         node_info = NodeInfo(
             name="dst",
             shape=(output_dim,),
             node_type="linear",
-            node_config={"activation": {"type": activation}, "energy": {"type": "gaussian"}},
+            node_config=validated_config,
             slots={},
             in_degree=1,
             out_degree=0,
@@ -152,8 +188,18 @@ class TestLinearAutoGradNode:
             out_edges=(),
         )
         # Override node_type for autograd version
-        info_fields = node_info.__dict__.copy()
-        node_info_explicit = NodeInfo(**{**info_fields, "node_type": "linear_explicit_grad"})
+        validated_config_explicit = make_node_config("linear_explicit_grad", activation)
+        node_info_explicit = NodeInfo(
+            name="dst",
+            shape=(output_dim,),
+            node_type="linear_explicit_grad",
+            node_config=validated_config_explicit,
+            slots={},
+            in_degree=1,
+            out_degree=0,
+            in_edges=(edge_key,),
+            out_edges=(),
+        )
 
         # Create initial node state with random latent
         z_latent = jax.random.normal(rngkey_latent, (batch_size, output_dim))

@@ -83,7 +83,7 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden", "shape": (128,), "type": "linear", "activation": {"type": "relu"}},
+                {"name": "hidden", "shape": (128,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -127,7 +127,7 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28, 1), "type": "linear"},
-                {"name": "hidden", "shape": (64,), "type": "linear", "activation": {"type": "tanh"}},
+                {"name": "hidden", "shape": (64,), "type": "linear", "flatten_input": True, "activation": {"type": "tanh"}},
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -164,7 +164,7 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "rgb_image", "shape": (32, 32, 3), "type": "linear"},
-                {"name": "hidden", "shape": (256,), "type": "linear", "activation": {"type": "relu"}},
+                {"name": "hidden", "shape": (256,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
                 {"name": "output", "shape": (100,), "type": "linear"},
             ],
             "edge_list": [
@@ -199,7 +199,7 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden1", "shape": (256,), "type": "linear", "activation": {"type": "relu"}},
+                {"name": "hidden1", "shape": (256,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
                 {"name": "hidden2", "shape": (128,), "type": "linear", "activation": {"type": "relu"}},
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
@@ -293,7 +293,7 @@ class TestSameParamsDifferentBatchSizes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden", "shape": (64,), "type": "linear", "activation": {"type": "tanh"}},
+                {"name": "hidden", "shape": (64,), "type": "linear", "flatten_input": True, "activation": {"type": "tanh"}},
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -330,7 +330,7 @@ class TestNDimTraining:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden", "shape": (64,), "type": "linear", "activation": {"type": "sigmoid"}},
+                {"name": "hidden", "shape": (64,), "type": "linear", "flatten_input": True, "activation": {"type": "sigmoid"}},
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -373,7 +373,7 @@ class TestNDimTraining:
         config = {
             "node_list": [
                 {"name": "image", "shape": (16, 16, 3), "type": "linear"},
-                {"name": "hidden", "shape": (32,), "type": "linear", "activation": {"type": "relu"}},
+                {"name": "hidden", "shape": (32,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
                 {"name": "output", "shape": (5,), "type": "linear"},
             ],
             "edge_list": [
@@ -410,7 +410,7 @@ class TestEnergyWithNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (14, 14), "type": "linear"},
-                {"name": "hidden", "shape": (32,), "type": "linear", "activation": {"type": "tanh"}},
+                {"name": "hidden", "shape": (32,), "type": "linear", "flatten_input": True, "activation": {"type": "tanh"}},
                 {"name": "output", "shape": (5,), "type": "linear"},
             ],
             "edge_list": [

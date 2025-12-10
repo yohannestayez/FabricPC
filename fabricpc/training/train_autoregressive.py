@@ -369,11 +369,18 @@ def _generation_step(
         params, state, clamps, structure, infer_steps, eta_infer
     )
 
-    # Get logits for the last position
-    output_latent = final_state.nodes[output_node].z_latent
-    logits = output_latent[:, -1, :]  # (batch, vocab_size)
+    # Get output for the last position
+    # z_mu contains the predicted output after activation (softmax for output node)
+    # z_latent is the raw latent state before activation
+    output_probs = final_state.nodes[output_node].z_mu
+    output_last = output_probs[:, -1, :]  # (batch, vocab_size)
 
-    # Apply temperature
+    # Convert to log-probabilities for sampling
+    # z_mu after softmax should be probabilities, convert to log-probs
+    # Adding epsilon avoids log(0)
+    logits = jnp.log(output_last + 1e-10)
+
+    # Apply temperature (divide log-probs, equivalent to taking prob^(1/T))
     logits = logits / temperature
 
     # Apply top-k filtering (always run but with large k if not specified)
