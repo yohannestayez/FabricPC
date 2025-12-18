@@ -25,8 +25,6 @@ def compute_local_weight_gradients(
     Compute local weight gradients for each node using its own error signal.
 
     This implements the local Hebbian learning rule for predictive coding:
-    - Weight gradient: -(input.T @ gain_mod_error)
-    - Bias gradient: -sum(gain_mod_error)
 
     Args:
         params: Current model parameters

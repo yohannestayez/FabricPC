@@ -241,7 +241,7 @@ class NodeBase(ABC):
         """
         Forward pass: update state and compute gradients of weights for local learning.
 
-        The local gradient for weights is: -(input.T @ gain_mod_error)
+        The local gradient for weights is: delE/delW
 
         Args:
             params: Current node parameters

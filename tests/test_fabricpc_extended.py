@@ -144,8 +144,6 @@ class TestShapeConsistency:
                 f"z_mu shape mismatch for {node_name}"
             assert node_state.pre_activation.shape == expected_shape, \
                 f"pre_activation shape mismatch for {node_name}"
-            assert node_state.gain_mod_error.shape == expected_shape, \
-                f"gain_mod_error shape mismatch for {node_name}"
 
     def test_projection_shapes_match(self, simple_chain_config):
         """Test that projections maintain correct shapes."""
@@ -218,7 +216,6 @@ class TestPropertyBased:
             assert node_state.error.shape == expected_shape
             assert node_state.z_mu.shape == expected_shape
             assert node_state.pre_activation.shape == expected_shape
-            assert node_state.gain_mod_error.shape == expected_shape
 
     @given(
         infer_steps=st.integers(min_value=1, max_value=20),

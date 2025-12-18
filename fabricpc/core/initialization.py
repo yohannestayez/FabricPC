@@ -116,6 +116,7 @@ def get_default_weight_init() -> Dict[str, Any]:
 # STATE INITIALIZATION
 # ==============================================================================
 
+# TODO define schema for state initialization configs
 def initialize_state_values(
     config: Dict[str, Any],
     key: jax.Array,  # from jax.random.PRNGKey

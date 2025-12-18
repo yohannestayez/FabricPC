@@ -30,6 +30,7 @@ from fabricpc.core.energy import (
     CrossEntropyEnergy,
     LaplacianEnergy,
     HuberEnergy,
+    KLDivergenceEnergy,
     _ENERGY_REGISTRY,
 )
 from fabricpc.graph.graph_net import create_pc_graph
@@ -290,6 +291,87 @@ class TestHuberEnergy:
         # In linear region: E = delta * (|diff| - 0.5 * delta) = 1.0 * (2.0 - 0.5) = 1.5
         assert jnp.allclose(energy[0], 1.5)
 
+
+class TestKLDivergenceEnergy:
+    """Test KL Divergence energy functional."""
+
+    def test_kl_divergence_registered(self):
+        """Test that KL divergence is registered."""
+        types = list_energy_types()
+        assert "kl_divergence" in types
+        assert get_energy_class("kl_divergence") is KLDivergenceEnergy
+
+    def test_kl_divergence_identical_distributions(self):
+        """Test KL divergence is zero for identical distributions."""
+        # When z == mu, KL divergence should be 0
+        z_latent = jnp.array([[0.2, 0.3, 0.4, 0.1]])
+        z_mu = jnp.array([[0.2, 0.3, 0.4, 0.1]])
+
+        energy = KLDivergenceEnergy.energy(z_latent, z_mu)
+
+        assert energy.shape == (1,)
+        assert jnp.allclose(energy[0], 0.0, atol=1e-6)
+
+    def test_kl_divergence_batch_computation(self):
+        """Test KL divergence computes correct numerical values."""
+        z_latent = jnp.array([
+            [0.7, 0.2, 0.1],
+            [0.3, 0.3, 0.4],
+        ])
+        z_mu = jnp.array([
+            [0.6, 0.3, 0.1],
+            [0.5, 0.25, 0.25],
+        ])
+
+        energy = KLDivergenceEnergy.energy(z_latent, z_mu)
+
+        assert energy.shape == (2,)
+
+        # Manually compute expected values
+        expected_0 = (
+            0.7 * jnp.log(0.7 / 0.6) +
+            0.2 * jnp.log(0.2 / 0.3) +
+            0.1 * jnp.log(0.1 / 0.1)
+        )
+        expected_1 = (
+            0.3 * jnp.log(0.3 / 0.5) +
+            0.3 * jnp.log(0.3 / 0.25) +
+            0.4 * jnp.log(0.4 / 0.25)
+        )
+
+        assert jnp.allclose(energy[0], expected_0, atol=1e-5)
+        assert jnp.allclose(energy[1], expected_1, atol=1e-5)
+
+    def test_kl_divergence_always_non_negative(self):
+        """Test that KL divergence is always >= 0 (Gibbs' inequality)."""
+        # Random probability distributions
+        key = jax.random.PRNGKey(42)
+        key1, key2 = jax.random.split(key)
+
+        # Generate random positive values and normalize
+        raw_z = jax.random.uniform(key1, (10, 5)) + 0.01
+        raw_mu = jax.random.uniform(key2, (10, 5)) + 0.01
+        z_latent = raw_z / raw_z.sum(axis=-1, keepdims=True)
+        z_mu = raw_mu / raw_mu.sum(axis=-1, keepdims=True)
+
+        energy = KLDivergenceEnergy.energy(z_latent, z_mu)
+
+        # KL divergence should always be non-negative
+        assert jnp.all(energy >= -1e-6)  # Small tolerance for numerical precision
+
+    def test_kl_divergence_zero_probability_handling(self):
+        """Test that zero probabilities are handled correctly."""
+        # When z has zeros, those terms should contribute 0 (0 * log(0) = 0)
+        z_latent = jnp.array([[1.0, 0.0, 0.0]])
+        z_mu = jnp.array([[0.8, 0.1, 0.1]])
+
+        energy = KLDivergenceEnergy.energy(z_latent, z_mu)
+
+        # Only the first term contributes: 1.0 * log(1.0 / 0.8)
+        expected = 1.0 * jnp.log(1.0 / 0.8)
+
+        assert jnp.isfinite(energy[0])  # Should not be inf or nan
+        assert jnp.allclose(energy[0], expected, atol=1e-5)
 
 class TestConfigValidation:
     """Test energy config validation."""

@@ -9,18 +9,18 @@ This is the absolute SIMPLEST example showing how to:
 
 Total code: ~60 lines. That's it!
 """
+import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("JAX_PLATFORMS", "cuda")  # change to "cpu", "cuda" or "tpu" if available
 
 import jax
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import time
-import os
 
 from fabricpc.graph import create_pc_graph
 from fabricpc.training import train_pcn, evaluate_pcn
 from fabricpc.training.data_utils import OneHotWrapper
-
-os.environ["JAX_PLATFORMS"] = "cuda"  # change to "cpu", "cuda" or "tpu" if available
 
 # jax.config.update("jax_traceback_filtering", "off")
 

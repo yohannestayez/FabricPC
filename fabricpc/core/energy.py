@@ -562,6 +562,101 @@ class HuberEnergy(EnergyFunctional):
         return jnp.clip(diff, -delta, delta)
 
 
+@register_energy("kl_divergence")
+class KLDivergenceEnergy(EnergyFunctional):
+    """
+    KL Divergence energy functional.
+
+    E = Σ z * log(z / μ) = Σ z * (log(z) - log(μ))
+
+    Computes D_KL(z || μ), the Kullback-Leibler divergence from μ to z.
+    Both z_latent and z_mu should be valid probability distributions
+    (non-negative, summing to 1 along the specified axis).
+
+    Use for:
+    - Matching probability distributions
+    - Variational inference objectives
+    - Information-theoretic losses
+
+    Config options:
+        - eps: Small constant for numerical stability (default: 1e-7)
+        - axis: Axis along which probabilities sum to 1 (default: -1)
+
+    Note:
+        KL divergence is asymmetric: D_KL(z || μ) ≠ D_KL(μ || z).
+        This implementation computes D_KL(z_latent || z_mu), penalizing
+        cases where z_latent has mass but z_mu does not.
+    """
+
+    CONFIG_SCHEMA = {
+        "eps": {
+            "type": (int, float),
+            "default": 1e-7,
+            "description": "Small constant for numerical stability in log"
+        },
+        "axis": {
+            "type": int,
+            "default": -1,
+            "description": "Axis along which probabilities sum to 1"
+        }
+    }
+
+    @staticmethod
+    def energy(
+        z_latent: jnp.ndarray,
+        z_mu: jnp.ndarray,
+        config: Dict[str, Any] = None
+    ) -> jnp.ndarray:
+        """
+        Compute KL divergence energy: E = Σ z * log(z / μ)
+
+        For numerical stability, uses: z * log(z) - z * log(μ)
+        with clipping to avoid log(0).
+        """
+        eps = config.get("eps", 1e-7) if config else 1e-7
+
+        # Clip for numerical stability
+        z_latent_safe = jnp.clip(z_latent, eps, 1.0)
+        z_mu_safe = jnp.clip(z_mu, eps, 1.0)
+
+        # KL divergence: z * log(z) - z * log(μ)
+        # Note: z * log(z) term handles the case where z -> 0 (gives 0, not -inf)
+        kl = z_latent_safe * (jnp.log(z_latent_safe) - jnp.log(z_mu_safe))
+
+        # Handle z = 0 case: 0 * log(0) should be 0, not nan
+        kl = jnp.where(z_latent < eps, 0.0, kl)
+
+        # Sum over all non-batch dimensions
+        axes_to_sum = tuple(range(1, len(kl.shape)))
+        return jnp.sum(kl, axis=axes_to_sum)
+
+    @staticmethod
+    def grad_latent(
+        z_latent: jnp.ndarray,
+        z_mu: jnp.ndarray,
+        config: Dict[str, Any] = None
+    ) -> jnp.ndarray:
+        """
+        Compute gradient: ∂E/∂z = log(z / μ) + 1 = log(z) - log(μ) + 1
+
+        For KL(z || μ):
+            ∂/∂z [z * log(z) - z * log(μ)] = log(z) + 1 - log(μ)
+        """
+        eps = config.get("eps", 1e-7) if config else 1e-7
+
+        z_latent_safe = jnp.clip(z_latent, eps, 1.0)
+        z_mu_safe = jnp.clip(z_mu, eps, 1.0)
+
+        # Gradient: log(z) - log(μ) + 1
+        grad = jnp.log(z_latent_safe) - jnp.log(z_mu_safe) + 1.0
+
+        # For z near 0, gradient should push toward matching μ
+        # Use a smooth approximation
+        grad = jnp.where(z_latent < eps, -jnp.log(z_mu_safe), grad)
+
+        return grad
+
+
 # =============================================================================
 # Convenience Functions
 # =============================================================================

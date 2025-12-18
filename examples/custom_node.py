@@ -144,7 +144,6 @@ class Conv2DNode(NodeBase):
             z_mu = state.z_latent
             pre_activation = jnp.zeros_like(state.z_latent)
             error = jnp.zeros_like(state.z_latent)
-            gain_mod_error = jnp.zeros_like(state.z_latent)
         else:
             # Accumulate convolution outputs from all inputs
             pre_activation = jnp.zeros((batch_size, *out_shape))
@@ -172,16 +171,11 @@ class Conv2DNode(NodeBase):
             # Compute error
             error = state.z_latent - z_mu
 
-            # Gain-modulated error
-            f_prime = activation_deriv(pre_activation)
-            gain_mod_error = error * f_prime
-
         # Update state
         state = state._replace(
             pre_activation=pre_activation,
             z_mu=z_mu,
             error=error,
-            gain_mod_error=gain_mod_error
         )
 
         # Compute energy

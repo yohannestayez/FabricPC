@@ -178,7 +178,6 @@ def initialize_state(
             error=jnp.zeros(shape),
             energy=jnp.zeros((batch_size,)),  # Per-sample energy
             pre_activation=jnp.zeros(shape),
-            gain_mod_error=jnp.zeros(shape),
             latent_grad=jnp.zeros(shape),
             substructure={},
         )

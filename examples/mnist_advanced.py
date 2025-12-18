@@ -10,6 +10,9 @@ This example demonstrates:
 
 Compared to mnist_demo.py, this shows a customizable training loop
 """
+import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("JAX_PLATFORMS", "cuda")
 
 import jax
 import jax.numpy as jnp
