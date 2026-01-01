@@ -328,26 +328,29 @@ def create_deep_transformer(
     nodes = []
     edges = []
 
+    # Sensor Node (Holds the raw integer indices from the dataset.)
+    nodes.append(
+        {
+            "name": "input_ids",
+            "shape": (seq_len,),
+            "type": "linear",
+            "activation": {"type": "identity"},
+        }
+    )
+
     # Input Node
-    if vocab_size is not None:
-        nodes.append(
-            {
-                "name": "input_embed",
-                "shape": (seq_len, embed_dim),
-                "type": "embedding",
-                "vocab_size": vocab_size,
-                "embed_dim": embed_dim,
-            }
-        )
-    else:
-        nodes.append(
-            {
-                "name": "input_embed",
-                "shape": (seq_len, embed_dim),
-                "type": "linear",
-                "activation": {"type": "identity"},
-            }
-        )
+    nodes.append(
+        {
+            "name": "input_embed",
+            "shape": (seq_len, embed_dim),
+            "type": "embedding",
+            "vocab_size": vocab_size,
+            "embed_dim": embed_dim,
+        }
+    )
+    edges.append(
+        {"source_name": "input_ids", "target_name": "input_embed", "slot": "in"}
+    )
 
     # Stack Transformer Blocks
     previous_node = "input_embed"
@@ -377,16 +380,16 @@ def create_deep_transformer(
     # Output Head
     nodes.append(
         {
-            "name": "output",
-            "shape": (seq_len, embed_dim),
+            "name": "logits",
+            "shape": (seq_len, vocab_size),
             "type": "linear",
             "activation": {"type": "identity"},
         }
     )
-    edges.append({"source_name": previous_node, "target_name": "output", "slot": "in"})
+    edges.append({"source_name": previous_node, "target_name": "logits", "slot": "in"})
 
     return {
         "node_list": nodes,
         "edge_list": edges,
-        "task_map": {"x": "input_embed", "y": "output"},
+        "task_map": {"x": "input_ids", "y": "logits"},
     }
