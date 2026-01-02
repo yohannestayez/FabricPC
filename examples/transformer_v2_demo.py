@@ -1,9 +1,12 @@
 import os
 import jax
+import jax.numpy as jnp
 import torch
 from torch.utils.data import DataLoader, Dataset
 from fabricpc.graph import create_pc_graph
-from fabricpc.training.train import train_pcn
+from fabricpc.training.train import train_pcn, evaluate_pcn
+from fabricpc.core.inference import run_inference
+from fabricpc.graph.graph_net import initialize_state
 from fabricpc.nodes.transformer import create_deep_transformer
 
 
@@ -66,7 +69,9 @@ train_dataset = TextDataset(train_data, seq_len, vocab_size)
 val_dataset = TextDataset(val_data, seq_len, vocab_size)
 test_dataset = TextDataset(test_data, seq_len, vocab_size)
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+train_loader = DataLoader(
+    train_dataset, batch_size=batch_size, shuffle=True, drop_last=True
+)
 val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
@@ -83,7 +88,7 @@ config = create_deep_transformer(
 )
 
 # ----------------------------------------------------------------------
-# CREATE PC GRAPH & TRAIN
+# CREATE PC GRAPH, TRAIN and EVALUATE
 # ----------------------------------------------------------------------
 master_rng_key = jax.random.PRNGKey(42)
 graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
@@ -100,9 +105,57 @@ print(f"Vocab Size: {vocab_size} | Training on local tiny_shakespeare.txt...")
 trained_params, _, _ = train_pcn(
     params, structure, train_loader, train_config, train_key, verbose=True
 )
-metrics = evaluate_pcn(
-    trained_params, structure, test_loader, train_config, eval_key, verbose=True
-)
+metrics = evaluate_pcn(trained_params, structure, test_loader, train_config, eval_key)
 
 print(f"Test Accuracy: {metrics['accuracy'] * 100:.2f}%")
 print(f"Test Loss: {metrics['loss']:.4f}")
+
+
+# ----------------------------------------------------------------------
+# TEXT GENERATION
+# ----------------------------------------------------------------------
+def generate(trained_params, structure, start_text="ROMEO: ", length=50):
+    seed_indices = [char_to_ix.get(c, 0) for c in start_text]
+    if len(seed_indices) < seq_len:
+        current_indices = [0] * (seq_len - len(seed_indices)) + seed_indices
+    else:
+        current_indices = seed_indices[-seq_len:]
+
+    result_text = start_text
+    gen_key = jax.random.PRNGKey(99)
+
+    print(f"--- Generating (Greedy) ---")
+    for _ in range(length):
+        input_batch = jnp.array([current_indices], dtype=jnp.float32)
+        inputs = {"input_ids": input_batch}
+        batch_size = input_batch.shape[0]
+
+        # Initialize state
+        state = initialize_state(
+            structure, batch_size, gen_key, clamps=inputs, params=trained_params
+        )
+
+        # Run PC inference
+        final_state = run_inference(
+            trained_params,
+            state,
+            clamps=inputs,
+            structure=structure,
+            infer_steps=train_config["infer_steps"],
+            eta_infer=train_config["eta_infer"],
+        )
+
+        logits_node_state = final_state.nodes["logits"]
+        last_step_logits = logits_node_state.z_latent[0, -1, :]
+
+        # Greedy Argmax
+        next_idx = int(jnp.argmax(last_step_logits))
+        next_char = ix_to_char[next_idx]
+
+        result_text += next_char
+        current_indices = current_indices[1:] + [next_idx]
+
+    print(result_text)
+
+
+generate(trained_params, structure, start_text="ROMEO: ", length=100)
