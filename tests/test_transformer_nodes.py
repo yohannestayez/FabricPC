@@ -18,7 +18,7 @@ from fabricpc.core.inference import run_inference
 from fabricpc.training import train_step, create_optimizer
 from fabricpc.nodes import get_node_class
 
-from fabricpc.nodes.transformer import EmbeddingNode, create_deep_transformer
+from fabricpc.nodes.transformer_v2 import EmbeddingNode, create_deep_transformer
 
 
 @pytest.fixture
