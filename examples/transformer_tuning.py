@@ -16,7 +16,7 @@ from fabricpc.nodes.transformer_v2 import create_deep_transformer
 import importlib.util
 
 spec = importlib.util.spec_from_file_location(
-    "bayesian_tuner", "/home/actpc/FabricPC/tuning/bayesian_tuner.py"
+    "bayesian_tuner", "/home/actpc/FabricPC/fabricpc/tuning/bayesian_tuner.py"
 )
 bayes_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bayes_module)
