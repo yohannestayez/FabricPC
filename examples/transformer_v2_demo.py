@@ -3,7 +3,7 @@ import jax
 import torch
 from torch.utils.data import DataLoader, Dataset
 from fabricpc.graph import create_pc_graph
-from fabricpc.training.train import train_pcn, evaluate_pcn
+from fabricpc.training.multi_gpu import train_pcn_multi_gpu, evaluate_pcn_multi_gpu
 from fabricpc.core.inference import run_inference
 from fabricpc.graph.state_initializer import initialize_graph_state
 from fabricpc.nodes.transformer_v2 import create_deep_transformer
@@ -99,15 +99,16 @@ train_config = {
 }
 
 print(f"Vocab Size: {vocab_size} | Training on local tiny_shakespeare.txt...")
-trained_params, _, _ = train_pcn(
+trained_params = train_pcn_multi_gpu(
     params, structure, train_loader, train_config, train_key, verbose=True
 )
-metrics = evaluate_pcn(
-    trained_params, structure, test_loader, train_config, eval_key, verbose=True
+metrics = evaluate_pcn_multi_gpu(
+    trained_params, structure, test_loader, train_config, eval_key
 )
 
 print(f"Test Accuracy: {metrics['accuracy'] * 100:.2f}%")
-print(f"Test Loss: {metrics['loss']:.4f}")
+if "loss" in metrics:
+    print(f"Test Loss: {metrics['loss']:.4f}")
 
 
 # ----------------------------------------------------------------------
