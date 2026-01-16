@@ -15,7 +15,7 @@ from jax import nn
 from fabricpc.nodes.base import NodeBase, SlotSpec
 from fabricpc.nodes.registry import register_node
 from fabricpc.core.types import NodeParams, NodeState, NodeInfo
-from fabricpc.core.initialization import initialize_weights
+from fabricpc.core.initializers import initialize
 from fabricpc.core.positional import precompute_freqs_cis, apply_rotary_emb
 
 # ==============================================================================
@@ -67,8 +67,8 @@ class EmbeddingNode(NodeBase):
         # Initialize embedding matrix (vocab_size, embed_dim)
         w_key, _ = jax.random.split(key)
         weights = {
-            "embeddings": initialize_weights(
-                config.get("weight_init"), w_key, (vocab_size, embed_dim)
+            "embeddings": initialize(
+                w_key, (vocab_size, embed_dim), config.get("weight_init")
             )
         }
         return NodeParams(weights=weights, biases={})
@@ -99,7 +99,10 @@ class EmbeddingNode(NodeBase):
         # because the "pre-activation" IS the lookup result.
         gain_mod_error = error
 
-        state = state._replace(z_mu=z_mu, error=error, gain_mod_error=gain_mod_error)
+        # Move gain_mod_error to substructure
+        state = state._replace(
+            z_mu=z_mu, error=error, substructure={"gain_mod_error": gain_mod_error}
+        )
 
         # Compute Energy
         state = EmbeddingNode.energy_functional(state, node_info)
@@ -186,7 +189,7 @@ class TransformerBlockNode(NodeBase):
 
         # Initialize weights
         def init_w(k, shape):
-            return initialize_weights({"type": "xavier"}, k, shape)
+            return initialize(k, shape, {"type": "xavier"})
 
         weights = {
             # Attention Projections
@@ -309,7 +312,14 @@ class TransformerBlockNode(NodeBase):
         # in the forward_inference/forward_learning wrappers.
         gain_mod_error = error
 
-        state = state._replace(z_mu=z_mu, error=error, gain_mod_error=gain_mod_error)
+        attn_substructure = {"attn_matrix": attn_probs, "Q": wq, "K": wk, "V": wv}
+
+        combined_substructure = {**attn_substructure, "gain_mod_error": gain_mod_error}
+
+        state = state._replace(
+            z_mu=z_mu, error=error, substructure=combined_substructure
+        )
+
         state = TransformerBlockNode.energy_functional(state, node_info)
         total_energy = jnp.sum(state.energy)
 

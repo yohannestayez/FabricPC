@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, Dataset
 from fabricpc.graph import create_pc_graph
 from fabricpc.training.train import train_pcn, evaluate_pcn
 from fabricpc.core.inference import run_inference
-from fabricpc.graph.graph_net import initialize_state
+from fabricpc.graph.state_initializer import initialize_graph_state
 from fabricpc.nodes.transformer_v2 import create_deep_transformer
 
 
@@ -108,3 +108,53 @@ metrics = evaluate_pcn(
 
 print(f"Test Accuracy: {metrics['accuracy'] * 100:.2f}%")
 print(f"Test Loss: {metrics['loss']:.4f}")
+
+
+# ----------------------------------------------------------------------
+# TEXT GENERATION
+# ----------------------------------------------------------------------
+def generate(trained_params, structure, start_text="ROMEO: ", length=50):
+    seed_indices = [char_to_ix.get(c, 0) for c in start_text]
+    if len(seed_indices) < seq_len:
+        current_indices = [0] * (seq_len - len(seed_indices)) + seed_indices
+    else:
+        current_indices = seed_indices[-seq_len:]
+
+    result_text = start_text
+    gen_key = jax.random.PRNGKey(99)
+
+    print(f"--- Generating (Greedy) ---")
+    for _ in range(length):
+        input_batch = jnp.array([current_indices], dtype=jnp.float32)
+        inputs = {"input_ids": input_batch}
+        batch_size = input_batch.shape[0]
+
+        # Initialize state
+        state = initialize_graph_state(
+            structure, batch_size, gen_key, clamps=inputs, params=trained_params
+        )
+
+        # Run PC inference
+        final_state = run_inference(
+            trained_params,
+            state,
+            clamps=inputs,
+            structure=structure,
+            infer_steps=train_config["infer_steps"],
+            eta_infer=train_config["eta_infer"],
+        )
+
+        logits_node_state = final_state.nodes["logits"]
+        last_step_logits = logits_node_state.z_latent[0, -1, :]
+
+        # Greedy Argmax
+        next_idx = int(jnp.argmax(last_step_logits))
+        next_char = ix_to_char[next_idx]
+
+        result_text += next_char
+        current_indices = current_indices[1:] + [next_idx]
+
+    print(result_text)
+
+
+generate(trained_params, structure, start_text="ROMEO: ", length=100)
