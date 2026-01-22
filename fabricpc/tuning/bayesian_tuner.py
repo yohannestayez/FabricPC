@@ -32,20 +32,9 @@ class BayesianTuner:
         study_name: str = "fabricpc_tuning",
         storage: Optional[str] = None,
         direction: str = "minimize",
-        log_file: Optional[str] = "tuning_results.jsonl"
+        log_file: Optional[str] = "transformer_multi_gpu_results.jsonl",
+        trainer_fn: Optional[Callable] = None,
     ):
-        """
-        Args:
-            train_loader: DataLoader for training.
-            val_loader: DataLoader for validation.
-            trial_model: Function that takes (config_dict, rng_key) and returns (params, structure).
-            base_config: Base configuration dictionary. Tuning updates this.
-            metric: Metric to minimize/maximize. 
-            study_name: Name of the Optuna study.
-            storage: Database URL for Optuna storage.
-            direction: 'minimize' or 'maximize'.
-            log_file: Path to save detailed trial logs.
-        """
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.trial_model = trial_model
@@ -53,7 +42,8 @@ class BayesianTuner:
         self.metric = metric
         self.direction = direction
         self.log_file = log_file
-        
+        self.trainer_fn = trainer_fn
+
         self.study = optuna.create_study(
             study_name=study_name,
             storage=storage,
@@ -62,16 +52,7 @@ class BayesianTuner:
         )
 
     def _suggest_from_config(self, trial: optuna.Trial, search_space: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate suggestions based on a dictionary configuration.
-        
-        Format:
-        {
-            "param_name": {"type": "float", "low": 0.0, "high": 1.0, "log": False},
-            "param_int": {"type": "int", "low": 1, "high": 10},
-            "param_cat": {"type": "categorical", "choices": ["a", "b", "c"]}
-        }
-        """
+        """Generate suggestions based on a dictionary configuration."""
         params = {}
         for name, config in search_space.items():
             param_type = config.get("type")
@@ -123,13 +104,40 @@ class BayesianTuner:
         )
         return self.study
 
-    def _log_trial(self, trial_data: Dict[str, Any]):
-        """Append trial data to local log file."""
-        if self.log_file:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.log_file) or ".", exist_ok=True)
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps(trial_data) + "\n")
+    def _log_trial_results(self, trial_number: int, duration: float, metrics: Dict[str, Any], config: Dict[str, Any]):
+        """Log trial results in clean table format like the original tuner."""
+        if not self.log_file:
+            return
+
+        # Extract fields
+        combined = metrics.get("combined_loss", 0.0)
+        perplexity = metrics.get("perplexity", 0.0)
+        ce_loss = metrics.get("cross_entropy", 0.0)
+        energy = metrics.get("energy", float("inf"))
+
+        header_needed = (trial_number == 0)
+
+        os.makedirs(os.path.dirname(self.log_file) or ".", exist_ok=True)
+        with open(self.log_file, "a") as f:
+
+            # Header
+            if header_needed:
+                f.write(
+                    f"{'Trial':<6} | {'Time(s)':<8} | {'combined':<10} | {'Perplexity':<12} | "
+                    f"{'CE Loss':<10} | {'Energy':<10} | {'LR':<8} | {'Embed':<6} | {'MLP':<6} | {'Heads':<5} | "
+                    f"{'Depth':<5} | {'Infer':<5} | {'Eta':<6}\n"
+                )
+                f.write("-" * 100 + "\n")
+
+            # Row
+            f.write(
+                f"{trial_number:<6} | {duration:<8.1f} | {combined:<10.4f} | {perplexity:<12.4f} | "
+                f"{ce_loss:<10.4f} | {energy:<10.4f} | {config.get('lr', 'N/A'):<8} | "
+                f"{config.get('embed_dim', 'N/A'):<6} | {config.get('mlp_dim', 'N/A'):<6} | "
+                f"{config.get('num_heads', 'N/A'):<5} | {config.get('depth', 'N/A'):<5} | "
+                f"{config.get('infer_steps', 'N/A'):<5} | {config.get('eta_infer', 'N/A'):<6}\n"
+            )
+
 
     def _objective(self, trial: optuna.Trial, search_space_fn: Callable[[optuna.Trial], Dict[str, Any]]) -> float:
         start_time = time.time()
@@ -155,53 +163,58 @@ class BayesianTuner:
             print(f"Trial {trial.number} pruned due to creation failure: {e}")
             raise optuna.TrialPruned()
 
-        # Training
+        # Execute Training and Evaluation
         try:
-            trained_params, iter_results, epoch_results = train_pcn(
-                params,
-                structure,
-                self.train_loader,
-                config,
-                train_key,
-                verbose=False
-            )
+            if self.trainer_fn:
+                result = self.trainer_fn(params, structure, self.train_loader, self.val_loader, config, train_key)
+                
+                if isinstance(result, dict):
+                    metrics = result
+                    val_score = metrics.get(self.metric, metrics.get("loss", float("inf")))
+                else:
+                    # Assume it returns the scalar score directly
+                    val_score = float(result)
+                    metrics = {self.metric: val_score}
+            
+            else:
+                # Default training loop
+                trained_params, _, _ = train_pcn(
+                    params,
+                    structure,
+                    self.train_loader,
+                    config,
+                    train_key,
+                    verbose=False
+                )
+                
+                metrics = evaluate_pcn(
+                    trained_params,
+                    structure,
+                    self.val_loader,
+                    config,
+                    jax.random.PRNGKey(0)
+                )
+                
+                # Calculate combined score if needed
+                if self.metric == "combined_loss":
+                    energy = metrics.get("energy", 0.0)
+                    perplexity = metrics.get("perplexity", 0.0)
+                    metrics["combined_loss"] = 0.5 * energy + 0.5 * perplexity
+                
+                if self.metric in metrics:
+                    val_score = metrics[self.metric]
+                else:
+                    # Fallback
+                    items = list(metrics.values())
+                    val_score = items[0] if items else float("inf")
+
         except Exception as e:
-            print(f"Trial {trial.number} failed during training: {e}")
+            print(f"Trial {trial.number} failed during training/eval: {e}")
+            import traceback
+            traceback.print_exc()
             return float("inf") if self.direction == "minimize" else float("-inf")
 
-        final_epoch_energies = iter_results[-1] if iter_results else []
-        final_energy_mean = float(np.mean(final_epoch_energies)) if final_epoch_energies else float("inf")
-        final_energy_std = float(np.std(final_epoch_energies)) if final_epoch_energies else 0.0
-
-        # Evaluation
-        eval_metrics = evaluate_pcn(
-            trained_params,
-            structure,
-            self.val_loader,
-            config,
-            jax.random.PRNGKey(0) 
-        )
-        
-        if self.metric == "combined_loss":
-            val_score = eval_metrics.get("loss", float("inf"))
-        elif self.metric in eval_metrics:
-            val_score = eval_metrics[self.metric]
-        else:
-             # Fallback
-             val_score = eval_metrics.get("loss", float("inf"))
-
         duration = time.time() - start_time
-
-        # Structured Logging
-        log_data = {
-            "trial_id": trial.number,
-            "params": sampled_params,
-            "val_metrics": eval_metrics,
-            "train_energy_mean": final_energy_mean,
-            "train_energy_std": final_energy_std,
-            "duration": duration,
-            "status": "COMPLETE"
-        }
-        self._log_trial(log_data)
-             
+        self._log_trial_results(trial.number, duration, metrics, config)
+        
         return val_score
