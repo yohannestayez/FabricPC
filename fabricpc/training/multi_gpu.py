@@ -311,6 +311,162 @@ def train_pcn_multi_gpu(
     return params
 
 
+def evaluate_transformer_multi_gpu(
+    params: GraphParams,
+    structure: GraphStructure,
+    test_loader: Any,
+    config: dict,
+    rng_key: jax.Array,
+) -> Dict[str, float]:
+    """
+    Evaluate PC Transformer using all available GPUs and compute accuracy, cross-entropy loss,
+    perplexity, and average energy.
+    """
+    n_devices = jax.device_count()
+
+    # Split keys for devices
+    epoch_key, rng_key = jax.random.split(rng_key)
+    if n_devices > 1:
+        device_keys = jax.random.split(epoch_key, n_devices)
+    else:
+        device_keys = jnp.expand_dims(epoch_key, axis=0)
+
+    # Replicate params across devices
+    params = replicate_params(params, n_devices)
+
+    infer_steps = config.get("infer_steps", 20)
+    eta_infer = config.get("eta_infer", 0.1)
+    state_init_config = structure.config["graph_state_initializer"]
+
+    # Handle loader length safely
+    try:
+        num_batches = len(test_loader)
+    except TypeError:
+        num_batches = 1000 # Fallback
+    
+    batch_keys_per_device = jax.vmap(lambda k: jax.random.split(k, num_batches))(device_keys)
+
+    # pmap'ed inference function
+    def inference_fn(params_obj: GraphParams, sharded_batch: Dict[str, jnp.ndarray], randgen_key: jax.Array):
+        batch_size_ = next(iter(sharded_batch.values())).shape[0]
+        clamps = {}
+        for task_name, task_value in sharded_batch.items():
+            if task_name in structure.task_map and task_name == "x":
+                node_name = structure.task_map[task_name]
+                clamps[node_name] = task_value
+
+        state = initialize_graph_state(
+            structure, batch_size_, randgen_key, clamps=clamps,
+            state_init_config=state_init_config, params=params_obj,
+        )
+        final_state = run_inference(params_obj, state, clamps, structure, infer_steps, eta_infer)
+        return final_state
+
+    pmap_inference = jax.pmap(inference_fn, axis_name="devices")
+
+    total_correct = 0
+    total_samples = 0
+    total_ce = 0.0
+    total_tokens = 0
+    total_energy = 0.0
+
+    for batch_idx, batch_data in enumerate(test_loader):
+        batch_key_for_step = batch_keys_per_device[:, batch_idx]
+
+        # Convert batch to dict of JAX arrays
+        if isinstance(batch_data, (list, tuple)):
+            batch = {"x": jnp.array(batch_data[0]), "y": jnp.array(batch_data[1])}
+        else:
+            batch = {k: jnp.array(v) for k, v in batch_data.items()}
+
+        batch_size = next(iter(batch.values())).shape[0]
+        # Skip last incomplete batch if not divisible by n_devices to avoid shape mismatch in pmap
+        if batch_size % n_devices != 0:
+            continue
+
+        # Shard batch
+        batch_sharded = shard_batch(batch, n_devices)
+
+        # Run inference on all GPUs
+        final_states = pmap_inference(params, batch_sharded, batch_key_for_step)
+        
+        # Calculate energy per device (internal + external/output error)
+        def get_device_energy(fs, batch_y):
+            e = 0.0
+            # Internal energy
+            for node_name in structure.nodes:
+                if structure.nodes[node_name].in_degree > 0:
+                    e += jnp.sum(fs.nodes[node_name].energy)
+            
+            # External energy (Output prediction error)
+            if "y" in structure.task_map:
+                y_node = structure.task_map["y"]
+                pred = fs.nodes[y_node].z_latent
+                
+                # Handle shapes: batch_y might be indices or one-hot
+                if batch_y.ndim == pred.ndim:
+                    error = pred - batch_y
+                    e += jnp.sum(error ** 2)
+                elif batch_y.ndim == pred.ndim - 1:
+                    tgt_oh = jax.nn.one_hot(batch_y, pred.shape[-1])
+                    error = pred - tgt_oh
+                    e += jnp.sum(error ** 2)
+            
+            return e
+
+        device_energies = jax.vmap(get_device_energy)(final_states, batch_sharded["y"])
+        total_energy += float(jnp.sum(device_energies))
+        total_samples += batch_size
+
+        if "y" in structure.task_map:
+            y_node = structure.task_map["y"]
+            # z_latent: (n_devices, device_batch, seq_len, vocab_size)
+            preds = final_states.nodes[y_node].z_latent
+            
+            # Reshape to (total_batch, ...)
+            preds_flat = preds.reshape(batch_size, *preds.shape[2:])
+            targets = batch["y"]
+
+            # --- Accuracy ---
+            pred_labels = jnp.argmax(preds_flat, axis=-1)
+            
+            if targets.ndim == preds_flat.ndim:
+                 # One-hot targets
+                true_labels = jnp.argmax(targets, axis=-1)
+            else:
+                 # Integer targets
+                true_labels = targets
+                
+            total_correct += int(jnp.sum(pred_labels == true_labels))
+
+            # Stable CE computation
+            softmax_preds = jax.nn.softmax(preds_flat, axis=-1)
+            
+            if targets.ndim == preds_flat.ndim:
+                # One-hot
+                batch_ce = -jnp.sum(targets * jnp.log(jnp.clip(softmax_preds, 1e-10, 1.0)))
+                target_tokens = targets.shape[0] * (targets.shape[1] if targets.ndim > 1 else 1)
+            else:
+                targets_one_hot = jax.nn.one_hot(targets, preds_flat.shape[-1])
+                batch_ce = -jnp.sum(targets_one_hot * jnp.log(jnp.clip(softmax_preds, 1e-10, 1.0)))
+                target_tokens = targets.size
+
+            total_ce += float(batch_ce)
+            total_tokens += target_tokens
+
+    accuracy = total_correct / total_tokens if total_tokens > 0 else 0.0
+    mean_ce = total_ce / total_tokens if total_tokens > 0 else 0.0
+    perplexity = float(jnp.exp(mean_ce)) if mean_ce > 0 else float("inf")
+    avg_energy = total_energy / total_samples if total_samples > 0 else 0.0
+
+    return {
+        "accuracy": accuracy,
+        "cross_entropy": mean_ce,
+        "perplexity": perplexity,
+        "energy": avg_energy, 
+    }
+
+
 def evaluate_pcn_multi_gpu(
     params: GraphParams,
     structure: GraphStructure,
