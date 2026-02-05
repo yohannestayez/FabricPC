@@ -1,7 +1,6 @@
 # add comment block describing the experiment
 """This script visualizes the training and evaluation of a Predictive Coding Network (PCN) on a specified dataset (MNIST)."""
-import torch
-import torch.nn.functional as F
+
 import numpy as np
 import plotly.graph_objects as go
 from plotly import colors
@@ -193,98 +192,25 @@ def plot_train_val_metric(
     fig.show()
 
 
-def unflatten_images(images, image_size=[3, 32, 32], normalize=True):
-    """Unflatten images. Tile them vertically."""
-    img = images.view(-1, *image_size).cpu().numpy()  # First dimension is batch size
-    # pixel_std = img[img > 0].std()
-    # pixel_mean = img[img > 0].mean()
-    # # clamp at 2 stddev above mean
-    # img = np.clip(img, 0, pixel_mean + 2 * pixel_std)
+def unflatten_images(images, image_size=(3, 32, 32), normalize=True):
+    """Unflatten images and tile them vertically for display.
+
+    Args:
+        images: Array of shape (batch, flat) or (batch, C, H, W).
+        image_size: Tuple of (channels, height, width).
+        normalize: Whether to normalize pixel values to [0, 1].
+
+    Returns:
+        NumPy array of shape (H, W*batch, 3) suitable for plotly.
+    """
+    img = np.asarray(images).reshape(-1, *image_size)  # (batch, C, H, W)
     if normalize:
-        img = (img - np.min(img)) / (np.max(img) - np.min(img))
-    img = (255 * img).astype(np.uint8)  # Scale and convert to uint8
+        img = (img - np.min(img)) / (np.max(img) - np.min(img) + 1e-8)
+    img = (255 * img).astype(np.uint8)
     if image_size[0] == 1:
-        # Replicate image 3 times in dimension 1
-        img = np.repeat(img, 3, axis=1)  # change from monochrome to grayscale
-    img = np.concatenate(
-        [img[i, :, :, :] for i in range(img.shape[0])], axis=1
-    )  # Tile vertically
-    img = np.transpose(img, (1, 2, 0))  # Change to HWC for plotly
+        # Replicate grayscale to RGB
+        img = np.repeat(img, 3, axis=1)
+    # Tile images vertically: concatenate along height axis
+    img = np.concatenate([img[i, :, :, :] for i in range(img.shape[0])], axis=1)
+    img = np.transpose(img, (1, 2, 0))  # (C, H, W) -> (H, W, C) for plotly
     return img
-
-
-def plot_generated_images(
-    model, x_batch, device=torch.device("cuda"), image_size=(1, 28, 28)
-):
-    # Store a copy of the latents
-    # check if the model has attribute z_latent
-    if hasattr(model, "z_latent"):
-        latents_given_image = [x.detach().clone() for x in model.z_latent]
-    else:
-        latents_given_image = None
-
-    B = x_batch.size(0)
-
-    # Input image
-    reference_image = unflatten_images(x_batch[0:10, :], image_size=image_size)
-    fig = go.Figure(go.Image(z=reference_image))
-    fig.update_layout(title="Input")
-    fig.show()
-
-    # Generated an image from label
-    y_dim = model.get_dim_for_key(model.task_map["y"])
-    y_batch = F.one_hot(
-        torch.tensor([i for i in range(10)], device=device), num_classes=y_dim
-    ).float()
-    # Clamp layers {node:data}
-    clamps_gen_image = {model.task_map["y"]: y_batch}  # classification vector
-
-    # Initialize latents
-    model.init_latents(
-        clamp_dict=clamps_gen_image, batch_size=y_batch.shape[0], device=device
-    )
-    # Inference
-    model.infer(clamps_gen_image)
-
-    # Output image
-    gen_img = model.get_task_result("x")
-    img = unflatten_images(gen_img, image_size=image_size)
-    fig = go.Figure(go.Image(z=img))
-    fig.update_layout(title="Generated Images")
-    fig.show()
-
-    # for i in range(min(10, B)):
-    #     # plot the histogram of pixel values
-    #     fig = go.Figure(data=[go.Histogram(x=gen_img[i, :].cpu().numpy())])
-    #     fig.update_layout(title=f"Histogram of pixel values for image {i}")
-    #     fig.show()
-
-    if latents_given_image is None:
-        return
-    # Class re-styled Image (assuming a sequential PC_MLP model)
-    # Change the class of an image (infer latents given an image; clamp class latents to desired class; infer again to generate image)
-    class_type = 3
-    target_class = F.one_hot(torch.tensor([class_type] * B), num_classes=y_dim).float()
-    # Generate image inferring on modified latents.
-    # Copy latent state from example images to initialize
-    clamps_gen_image = {
-        model.task_map["y"]: target_class.to(device),  # classification vector
-        1: latents_given_image[1].detach().clone(),
-    }
-    # Initialize latents
-    model.init_latents(
-        clamp_dict=clamps_gen_image, batch_size=B, device=device, std=0.1
-    )
-    # Clamp layers for inference
-    clamps_gen_image = {
-        model.task_map["y"]: target_class.to(device)
-    }  # classification vector
-    # Inference
-    model.infer(clamps_gen_image)
-
-    # Output image
-    gen_img = model.get_task_result("x")
-    img = unflatten_images(gen_img[0:10, :], image_size=image_size)
-    fig = go.Figure(go.Image(z=img))
-    fig.update_layout(title="Class re-styled Images")
-    fig.show()

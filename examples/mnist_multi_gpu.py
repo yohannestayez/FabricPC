@@ -14,23 +14,24 @@ Note: This will work with 1 GPU (falls back to single-GPU) but the real benefits
 come with 2+ GPUs.
 """
 
+import os  # set environment variables before importing JAX
+
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault(
+    "JAX_PLATFORMS", "cuda"
+)  # options: "cpu", "cuda" or "tpu" if available
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
+
 import jax
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 import time
 
 from fabricpc.graph import create_pc_graph
 from fabricpc.training import train_pcn_multi_gpu, evaluate_pcn_multi_gpu
-from fabricpc.training.data_utils import OneHotWrapper
+from fabricpc.utils.data.dataloader import MnistLoader
 
 # Set random seed
 master_rng_key = jax.random.PRNGKey(0)
 graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
-import torch
-import numpy as np
-# Set seeds for torch data loaders
-torch.manual_seed(0)
-np.random.seed(0)
 
 # ==============================================================================
 # CONFIGURATION
@@ -66,9 +67,9 @@ train_config = {
 # DEVICE INFORMATION
 # ==============================================================================
 
-print("="*70)
+print("=" * 70)
 print("Multi-GPU Predictive Coding - MNIST")
-print("="*70)
+print("=" * 70)
 
 n_devices = jax.device_count()
 devices = jax.devices()
@@ -103,28 +104,16 @@ print(f"  Parameters: {num_params:,}")
 
 print(f"\n[Data Loading]")
 
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,)),
-    transforms.Lambda(lambda x: x.view(-1)),  # Flatten to 784
-])
-
-train_data = datasets.MNIST('./data', train=True, download=True, transform=transform)
-test_data = datasets.MNIST('./data', train=False, download=True, transform=transform)
-
 # Important: Batch size should be divisible by number of devices!
 batch_size = 200 * n_devices  # Scale batch size with number of devices
 print(f"  Batch size: {batch_size} ({batch_size // n_devices} per device)")
 
-train_loader = DataLoader(
-    train_data, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True
+train_loader = MnistLoader(
+    "train", batch_size=batch_size, tensor_format="flat", shuffle=True, seed=42
 )
-test_loader = DataLoader(
-    test_data, batch_size=batch_size, shuffle=False, num_workers=4, drop_last=True
+test_loader = MnistLoader(
+    "test", batch_size=batch_size, tensor_format="flat", shuffle=False
 )
-
-train_loader = OneHotWrapper(train_loader)
-test_loader = OneHotWrapper(test_loader)
 
 print(f"  Train batches: {len(train_loader)}")
 print(f"  Test batches: {len(test_loader)}")
@@ -155,29 +144,35 @@ training_time = time.time() - start_time
 
 print(f"\n  Total training time: {training_time:.1f}s")
 print(f"  Average time per epoch: {training_time / train_config['num_epochs']:.1f}s")
-print(f"  Throughput: {len(train_loader.dataset) * train_config['num_epochs'] / training_time:.0f} samples/sec")
+print(
+    f"  Throughput: {train_loader.num_examples * train_config['num_epochs'] / training_time:.0f} samples/sec"
+)
 
 # ==============================================================================
 # EVALUATE
 # ==============================================================================
 
 print(f"\n[Evaluation]")
-metrics = evaluate_pcn_multi_gpu(trained_params, structure, test_loader, train_config, eval_key)
+metrics = evaluate_pcn_multi_gpu(
+    trained_params, structure, test_loader, train_config, eval_key
+)
 print(f"  Test Accuracy: {metrics['accuracy'] * 100:.2f}%")
 
 # ==============================================================================
 # SUMMARY
 # ==============================================================================
 
-print("\n" + "="*70)
+print("\n" + "=" * 70)
 print("Multi-GPU Training Complete!")
-print("="*70)
+print("=" * 70)
 
 if n_devices > 1:
     print(f"\n✓ Successfully trained on {n_devices} GPUs using pmap")
     print(f"✓ Automatic batch sharding across devices")
     print(f"✓ Gradient averaging with pmean")
-    print(f"✓ Throughput: {len(train_loader.dataset) * train_config['num_epochs'] / training_time:.0f} samples/sec")
+    print(
+        f"✓ Throughput: {train_loader.num_examples * train_config['num_epochs'] / training_time:.0f} samples/sec"
+    )
 
     print(f"\nScaling Efficiency:")
     print(f"  - Linear scaling expected: {n_devices}x speedup")
@@ -191,4 +186,4 @@ print("  • pmap provides data parallelism with minimal code changes")
 print("  • Batch size scales with number of devices")
 print("  • Gradients are automatically averaged across devices")
 print("  • Nearly linear speedup with multiple GPUs")
-print("="*70)
+print("=" * 70)

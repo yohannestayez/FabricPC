@@ -10,10 +10,6 @@ from fabricpc.training.multi_gpu import (
     replicate_params,
     shard_batch,
 )
-from fabricpc.training.data_utils import (
-    OneHotWrapper,
-    # TODO: jax data loaders)
-)
 from fabricpc.training.train_backprop import (
     compute_loss,
     train_step_backprop,

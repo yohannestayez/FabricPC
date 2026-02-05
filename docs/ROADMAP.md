@@ -1398,18 +1398,8 @@ class EnergyMonitor(Callback):
 
 
 class TensorBoardLogger(Callback):
-    """Log to TensorBoard."""
+    """Log to Aim TensorBoard."""
 
-    def __init__(self, log_dir: str):
-        from torch.utils.tensorboard import SummaryWriter
-        self.writer = SummaryWriter(log_dir)
-        self.step = 0
-
-    def on_epoch_end(self, epoch, logs):
-        for key, value in logs.items():
-            if isinstance(value, (int, float)):
-                self.writer.add_scalar(key, value, epoch)
-        self.step += 1
 ```
 
 ---
@@ -1432,81 +1422,82 @@ Key innovations demonstrated:
 3. Efficient inference with adaptive scheduling
 """
 
+
 def create_pc_transformer(
-    vocab_size: int,
-    embed_dim: int = 256,
-    num_heads: int = 8,
-    num_blocks: int = 4,
-    num_classes: int = 2,
-    max_seq_len: int = 512,
+        vocab_size: int,
+        embed_dim: int = 256,
+        num_heads: int = 8,
+        num_blocks: int = 4,
+        num_classes: int = 2,
+        max_seq_len: int = 512,
 ):
-    """Create a predictive coding transformer for text classification."""
+ """Create a predictive coding transformer for text classification."""
 
-    net = PCNetwork()
+ net = PCNetwork()
 
-    # Input embedding (tokens -> embeddings)
-    net.add_node("input", dim=vocab_size, activation="identity")
-    net.add_node("embedding", dim=embed_dim, node_type="linear", activation="identity")
+ # Input embedding (tokens -> embeddings)
+ net.add_node("input", dim=vocab_size, activation="identity")
+ net.add_node("embedding", dim=embed_dim, node_type="linear", activation="identity")
 
-    # Positional encoding
-    net.add_node("pos_encoding", dim=embed_dim, node_type="positional_encoding",
-                 max_len=max_seq_len)
+ # Positional encoding
+ net.add_node("pos_encoding", dim=embed_dim, node_type="positional_encoding",
+              max_len=max_seq_len)
 
-    # Transformer layers
-    prev_layer = "embedding"
-    for i in range(num_blocks):
-        layer_name = f"transformer_{i}"
-        net.add_node(layer_name, dim=embed_dim, node_type="transformer_block",
-                    num_heads=num_heads, ffn_dim=embed_dim * 4)
-        net.connect(prev_layer, layer_name)
-        if i == 0:
-            net.connect("pos_encoding", layer_name, slot="position")
-        prev_layer = layer_name
+ # Transformer layers
+ prev_layer = "embedding"
+ for i in range(num_blocks):
+  layer_name = f"transformer_{i}"
+  net.add_node(layer_name, dim=embed_dim, node_type="transformer_block",
+               num_heads=num_heads, ffn_dim=embed_dim * 4)
+  net.connect(prev_layer, layer_name)
+  if i == 0:
+   net.connect("pos_encoding", layer_name, slot="position")
+  prev_layer = layer_name
 
-    # Classification head
-    net.add_node("pool", dim=embed_dim, node_type="mean_pool")
-    net.add_node("classifier", dim=num_classes, activation="softmax")
+ # Classification head
+ net.add_node("pool", dim=embed_dim, node_type="mean_pool")
+ net.add_node("classifier", dim=num_classes, activation="softmax")
 
-    net.connect("input", "embedding")
-    net.connect(prev_layer, "pool")
-    net.connect("pool", "classifier")
+ net.connect("input", "embedding")
+ net.connect(prev_layer, "pool")
+ net.connect("pool", "classifier")
 
-    net.set_task_mapping(x="input", y="classifier")
+ net.set_task_mapping(x="input", y="classifier")
 
-    return net
+ return net
 
 
 # Training script
 if __name__ == "__main__":
-    import jax
-    from fabricpc.training.data_utils import load_imdb_dataset
+ import jax
+ from fabricpc.utils.data.data_utils import load_imdb_dataset
 
-    # Load data
-    train_loader, test_loader, vocab = load_imdb_dataset(batch_size=32)
+ # Load data
+ train_loader, test_loader, vocab = load_imdb_dataset(batch_size=32)
 
-    # Create model
-    model = create_pc_transformer(
-        vocab_size=len(vocab),
-        embed_dim=256,
-        num_heads=8,
-        num_blocks=4,
-        num_classes=2,
-    )
-    model.init(jax.random.PRNGKey(42))
+ # Create model
+ model = create_pc_transformer(
+  vocab_size=len(vocab),
+  embed_dim=256,
+  num_heads=8,
+  num_blocks=4,
+  num_classes=2,
+ )
+ model.init(jax.random.PRNGKey(42))
 
-    # Train with adaptive solver
-    history = model.fit(
-        train_loader,
-        epochs=10,
-        infer_steps=30,
-        solver="adaptive",
-        optimizer="adamw",
-        learning_rate=1e-4,
-    )
+ # Train with adaptive solver
+ history = model.fit(
+  train_loader,
+  epochs=10,
+  infer_steps=30,
+  solver="adaptive",
+  optimizer="adamw",
+  learning_rate=1e-4,
+ )
 
-    # Evaluate
-    accuracy = model.evaluate(test_loader)
-    print(f"Test accuracy: {accuracy:.4f}")
+ # Evaluate
+ accuracy = model.evaluate(test_loader)
+ print(f"Test accuracy: {accuracy:.4f}")
 ```
 
 ### 6.2 Demo: ConvNet for Time Series
@@ -1525,78 +1516,79 @@ Demonstrates:
 3. PC inference for temporal prediction
 """
 
+
 def create_pc_convnet(
-    input_channels: int,
-    seq_length: int,
-    num_classes: int,
-    base_filters: int = 32,
+        input_channels: int,
+        seq_length: int,
+        num_classes: int,
+        base_filters: int = 32,
 ):
-    """Create a PC-ConvNet for time series classification."""
+ """Create a PC-ConvNet for time series classification."""
 
-    net = PCNetwork()
+ net = PCNetwork()
 
-    # Input layer (batch, seq_len, channels)
-    net.add_node("input", shape=(seq_length, input_channels), activation="identity")
+ # Input layer (batch, seq_len, channels)
+ net.add_node("input", shape=(seq_length, input_channels), activation="identity")
 
-    # Conv blocks with increasing receptive field
-    prev = "input"
-    channels = [base_filters, base_filters * 2, base_filters * 4]
+ # Conv blocks with increasing receptive field
+ prev = "input"
+ channels = [base_filters, base_filters * 2, base_filters * 4]
 
-    for i, ch in enumerate(channels):
-        conv_name = f"conv_{i}"
-        bn_name = f"bn_{i}"
+ for i, ch in enumerate(channels):
+  conv_name = f"conv_{i}"
+  bn_name = f"bn_{i}"
 
-        net.add_node(conv_name, shape=(seq_length // (2**i), ch),
-                    node_type="conv1d", kernel_size=5, stride=2,
-                    activation="relu")
-        net.add_node(bn_name, shape=(seq_length // (2**i), ch),
-                    node_type="batch_norm")
+  net.add_node(conv_name, shape=(seq_length // (2 ** i), ch),
+               node_type="conv1d", kernel_size=5, stride=2,
+               activation="relu")
+  net.add_node(bn_name, shape=(seq_length // (2 ** i), ch),
+               node_type="batch_norm")
 
-        net.connect(prev, conv_name)
-        net.connect(conv_name, bn_name)
-        prev = bn_name
+  net.connect(prev, conv_name)
+  net.connect(conv_name, bn_name)
+  prev = bn_name
 
-    # Global average pooling
-    net.add_node("gap", dim=channels[-1], node_type="global_avg_pool1d")
-    net.connect(prev, "gap")
+ # Global average pooling
+ net.add_node("gap", dim=channels[-1], node_type="global_avg_pool1d")
+ net.connect(prev, "gap")
 
-    # Classification
-    net.add_node("fc", dim=64, activation="relu")
-    net.add_node("output", dim=num_classes, activation="softmax")
+ # Classification
+ net.add_node("fc", dim=64, activation="relu")
+ net.add_node("output", dim=num_classes, activation="softmax")
 
-    net.connect("gap", "fc")
-    net.connect("fc", "output")
+ net.connect("gap", "fc")
+ net.connect("fc", "output")
 
-    net.set_task_mapping(x="input", y="output")
+ net.set_task_mapping(x="input", y="output")
 
-    return net
+ return net
 
 
 if __name__ == "__main__":
-    from fabricpc.training.data_utils import load_ucr_dataset
+ from fabricpc.utils.data.data_utils import load_ucr_dataset
 
-    # Load UCR dataset (e.g., ECG200)
-    train_loader, test_loader, metadata = load_ucr_dataset("ECG200", batch_size=32)
+ # Load UCR dataset (e.g., ECG200)
+ train_loader, test_loader, metadata = load_ucr_dataset("ECG200", batch_size=32)
 
-    model = create_pc_convnet(
-        input_channels=1,
-        seq_length=metadata["seq_length"],
-        num_classes=metadata["num_classes"],
-    )
-    model.init(jax.random.PRNGKey(42))
+ model = create_pc_convnet(
+  input_channels=1,
+  seq_length=metadata["seq_length"],
+  num_classes=metadata["num_classes"],
+ )
+ model.init(jax.random.PRNGKey(42))
 
-    # Train with iPC solver (good for deep convnets)
-    history = model.fit(
-        train_loader,
-        epochs=50,
-        infer_steps=25,
-        solver="ipc",
-        optimizer="adam",
-        learning_rate=1e-3,
-    )
+ # Train with iPC solver (good for deep convnets)
+ history = model.fit(
+  train_loader,
+  epochs=50,
+  infer_steps=25,
+  solver="ipc",
+  optimizer="adam",
+  learning_rate=1e-3,
+ )
 
-    accuracy = model.evaluate(test_loader)
-    print(f"Test accuracy: {accuracy:.4f}")
+ accuracy = model.evaluate(test_loader)
+ print(f"Test accuracy: {accuracy:.4f}")
 ```
 
 ### 6.3 Demo: Deep PC Networks with Hypergraphs

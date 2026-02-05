@@ -11,18 +11,19 @@ This example demonstrates:
 Run with: python examples/custom_node.py
 """
 
-import os
+import os  # set environment variables before importing JAX
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-os.environ.setdefault("JAX_PLATFORMS", "cuda")
+os.environ.setdefault(
+    "JAX_PLATFORMS", "cuda"
+)  # options: "cpu", "cuda" or "tpu" if available
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
 
 import time
 from typing import Dict, Any, Tuple
 import jax
 import jax.numpy as jnp
-import torch
-import numpy as np
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+from fabricpc.utils.data.dataloader import MnistLoader
 
 from fabricpc.nodes.base import NodeBase, SlotSpec
 from fabricpc.nodes.registry import register_node
@@ -30,12 +31,12 @@ from fabricpc.core.types import NodeParams, NodeState, NodeInfo
 from fabricpc.core.activations import get_activation
 from fabricpc.graph import create_pc_graph
 from fabricpc.training import train_pcn, evaluate_pcn
-from fabricpc.training.data_utils import OneHotWrapper
 
 
 # ==============================================================================
 # CUSTOM NODE DEFINITION
 # ==============================================================================
+
 
 @register_node("conv2d")
 class Conv2DNode(NodeBase):
@@ -55,18 +56,18 @@ class Conv2DNode(NodeBase):
         "kernel_size": {
             "type": tuple,
             "required": True,
-            "description": "Convolution kernel size (kH, kW)"
+            "description": "Convolution kernel size (kH, kW)",
         },
         "stride": {
             "type": tuple,
             "default": (1, 1),
-            "description": "Stride for convolution"
+            "description": "Stride for convolution",
         },
         "padding": {
             "type": str,
             "default": "SAME",
             "choices": ["SAME", "VALID"],
-            "description": "Padding mode"
+            "description": "Padding mode",
         },
     }
 
@@ -80,7 +81,7 @@ class Conv2DNode(NodeBase):
         key: jax.Array,
         node_shape: Tuple[int, ...],
         input_shapes: Dict[str, Tuple[int, ...]],
-        config: Dict[str, Any]
+        config: Dict[str, Any],
     ) -> NodeParams:
         """
         Initialize convolution kernels and biases.
@@ -100,10 +101,12 @@ class Conv2DNode(NodeBase):
             # Initialize kernel with small values for stability
             # TODO: use fabricpc.core.initializers import initialize
             std = 0.01  # Small init for predictive coding stability
-            kernel = jax.random.normal(
-                keys[i],
-                (kernel_size[0], kernel_size[1], in_channels, out_channels)
-            ) * std
+            kernel = (
+                jax.random.normal(
+                    keys[i], (kernel_size[0], kernel_size[1], in_channels, out_channels)
+                )
+                * std
+            )
             weights_dict[edge_key] = kernel
 
         # Initialize bias
@@ -113,10 +116,7 @@ class Conv2DNode(NodeBase):
         else:
             bias = jnp.array([])
 
-        return NodeParams(
-            weights=weights_dict,
-            biases={"b": bias} if use_bias else {}
-        )
+        return NodeParams(weights=weights_dict, biases={"b": bias} if use_bias else {})
 
     @staticmethod
     def forward(
@@ -131,6 +131,7 @@ class Conv2DNode(NodeBase):
         Computes: conv2d(x, kernel) + bias -> activation -> error -> energy
         """
         from fabricpc.nodes import get_node_class
+
         node_class = get_node_class(node_info.node_type)
 
         config = node_info.node_config
@@ -153,11 +154,11 @@ class Conv2DNode(NodeBase):
                 kernel = params.weights[edge_key]
                 # Use JAX's lax.conv_general_dilated for the convolution
                 conv_out = jax.lax.conv_general_dilated(
-                    x,                          # input: NHWC
-                    kernel,                     # kernel: HWIO
+                    x,  # input: NHWC
+                    kernel,  # kernel: HWIO
                     window_strides=stride,
                     padding=padding,
-                    dimension_numbers=('NHWC', 'HWIO', 'NHWC')
+                    dimension_numbers=("NHWC", "HWIO", "NHWC"),
                 )
                 pre_activation = pre_activation + conv_out
 
@@ -166,7 +167,9 @@ class Conv2DNode(NodeBase):
                 pre_activation = pre_activation + params.biases["b"]
 
             # Apply activation
-            activation_fn, activation_deriv = get_activation(node_info.node_config["activation"])
+            activation_fn, activation_deriv = get_activation(
+                node_info.node_config["activation"]
+            )
             z_mu = activation_fn(pre_activation)
 
             # Compute error
@@ -189,6 +192,7 @@ class Conv2DNode(NodeBase):
 # ==============================================================================
 # NETWORK CONFIGURATION
 # ==============================================================================
+
 
 def create_conv_mnist_config():
     """
@@ -249,21 +253,20 @@ def create_conv_mnist_config():
 # MAIN
 # ==============================================================================
 
+
 def main():
     print("=" * 70)
     print("Custom Node Example: Conv2D on MNIST")
     print("=" * 70)
 
     # Set random seeds for reproducibility
-    jax.config.update('jax_default_prng_impl', 'threefry2x32')
+    jax.config.update("jax_default_prng_impl", "threefry2x32")
     master_rng_key = jax.random.PRNGKey(42)
-    torch.manual_seed(42)
-    np.random.seed(42)
-
     graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
 
     # Show registered node types (should include our custom conv2d)
     from fabricpc.nodes import list_node_types
+
     print(f"\nRegistered node types: {list_node_types()}")
 
     # Create model
@@ -271,7 +274,9 @@ def main():
     config = create_conv_mnist_config()
     params, structure = create_pc_graph(config, graph_key)
 
-    print(f"Model created: {len(config['node_list'])} nodes, {len(config['edge_list'])} edges")
+    print(
+        f"Model created: {len(config['node_list'])} nodes, {len(config['edge_list'])} edges"
+    )
     for name, node_info in structure.nodes.items():
         print(f"  {name}: shape={node_info.shape}, type={node_info.node_type}")
 
@@ -280,31 +285,15 @@ def main():
 
     # Training config (fewer epochs for demo)
     train_config = {
-        "num_epochs": 3,        # Fewer epochs for demo
-        "infer_steps": 10,      # Inference steps
-        "eta_infer": 0.05,      # Inference learning rate
+        "num_epochs": 3,  # Fewer epochs for demo
+        "infer_steps": 10,  # Inference steps
+        "eta_infer": 0.05,  # Inference learning rate
         "optimizer": {"type": "adam", "lr": 0.001},
     }
     batch_size = 64  # Smaller batch for conv nets
 
-    # Load MNIST data
-    print("\nLoading MNIST dataset...")
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)),
-        # Reshape to (28, 28, 1) for NHWC format
-        transforms.Lambda(lambda x: x.permute(1, 2, 0)),
-    ])
-
-    train_data = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    test_data = datasets.MNIST('./data', train=False, download=True, transform=transform)
-
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=4)
-
-    # Wrap with OneHotWrapper
-    train_loader = OneHotWrapper(train_loader)
-    test_loader = OneHotWrapper(test_loader)
+    train_loader = MnistLoader("train", batch_size=batch_size, shuffle=True, seed=42)
+    test_loader = MnistLoader("test", batch_size=batch_size, shuffle=False)
 
     # Train
     print("\nTraining (JIT compilation on first batch, may take a moment)...")
@@ -321,7 +310,9 @@ def main():
     )
 
     train_time = time.time() - start_time
-    print(f"Training time: {train_time:.1f}s ({train_time / train_config['num_epochs']:.1f}s per epoch)")
+    print(
+        f"Training time: {train_time:.1f}s ({train_time / train_config['num_epochs']:.1f}s per epoch)"
+    )
 
     # Evaluate
     print("\nEvaluating on test set...")

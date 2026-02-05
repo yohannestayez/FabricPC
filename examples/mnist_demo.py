@@ -9,29 +9,29 @@ This is the absolute SIMPLEST example showing how to:
 
 Total code: ~60 lines. That's it!
 """
-import os
+
+import os  # set environment variables before importing JAX
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-os.environ.setdefault("JAX_PLATFORMS", "cuda")  # change to "cpu", "cuda" or "tpu" if available
+os.environ.setdefault(
+    "JAX_PLATFORMS", "cuda"
+)  # options: "cpu", "cuda" or "tpu" if available
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
 
 import jax
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 import time
 
 from fabricpc.graph import create_pc_graph
 from fabricpc.training import train_pcn, evaluate_pcn
-from fabricpc.training.data_utils import OneHotWrapper
+from fabricpc.utils.data.dataloader import MnistLoader
 
 # jax.config.update("jax_traceback_filtering", "off")
 
 # Set random seed for reproducibility
-jax.config.update('jax_default_prng_impl', 'threefry2x32')  # 'rbg' is faster than 'threefry2x32', but less reproducible across vmap
+jax.config.update(
+    "jax_default_prng_impl", "threefry2x32"
+)  # 'rbg' is faster than 'threefry2x32', but less reproducible across vmap
 master_rng_key = jax.random.PRNGKey(0)
-import torch
-import numpy as np
-# Set seeds for torch data loaders
-torch.manual_seed(0)
-np.random.seed(0)
 
 # Split keys for different stages
 graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
@@ -76,28 +76,21 @@ batch_size=200
 # ==============================================================================
 params, structure = create_pc_graph(config, graph_key)
 
-print(f"Model created: {len(config['node_list'])} nodes, {len(config['edge_list'])} edges")
+print(
+    f"Model created: {len(config['node_list'])} nodes, {len(config['edge_list'])} edges"
+)
 print(f"Total parameters: {sum(p.size for p in jax.tree_util.tree_leaves(params))}")
-print("os.fork warning is harmless - due to PyTorch data loaders.")
 
 # ==============================================================================
 # LOAD DATA
 # ==============================================================================
 
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,)),
-    transforms.Lambda(lambda x: x.view(-1)),  # Flatten to 784
-])
-
-train_data = datasets.MNIST('./data', train=True, download=True, transform=transform)
-test_data = datasets.MNIST('./data', train=False, download=True, transform=transform)
-
-train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16)
-test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16)
-
-train_loader = OneHotWrapper(train_loader)
-test_loader = OneHotWrapper(test_loader)
+train_loader = MnistLoader(
+    "train", batch_size=batch_size, tensor_format="flat", shuffle=True, seed=42
+)
+test_loader = MnistLoader(
+    "test", batch_size=batch_size, tensor_format="flat", shuffle=False
+)
 
 # ==============================================================================
 # TRAIN (with automatic JIT compilation!)
@@ -114,7 +107,9 @@ trained_params, energy_history, _ = train_pcn(
     verbose=True,
 )
 delta_t = time.time() - start_time
-print(f"Avg Training time: {delta_t / train_config["num_epochs"]:.2f} seconds per epoch")
+print(
+    f"Avg Training time: {delta_t / train_config["num_epochs"]:.2f} seconds per epoch"
+)
 
 # ==============================================================================
 # EVALUATE
@@ -125,7 +120,7 @@ metrics = evaluate_pcn(trained_params, structure, test_loader, train_config, eva
 print(f"Test Accuracy: {metrics['accuracy'] * 100:.2f}%")
 print(f"Test energy: {metrics['energy']:.4f}")
 
-print("\n" + "="*70)
+print("\n" + "=" * 70)
 print("That's it! Want to change the architecture?")
 print("Just modify the config dictionary above:")
 print("  - Add more nodes to node_list for deeper networks")
@@ -137,4 +132,4 @@ print("  ✓ Automatic JIT compilation (10-20x speedup)")
 print("  ✓ Functional programming (easier to debug)")
 print("  ✓ Multi-GPU ready (just add pmap!)")
 print("  ✓ TPU support out of the box")
-print("="*70)
+print("=" * 70)

@@ -56,13 +56,16 @@ def run_inference_with_history(
     ) -> Tuple[GraphState, Dict[str, Dict[str, jnp.ndarray]]]:
         new_state = inference_step(params, state, clamps, structure, eta_infer)
         # Extract key metrics for history (lightweight)
+        # Reduce over batch dimension to get scalar metrics per step
         step_metrics = {
             node_name: {
-                "energy": node_state.energy,
-                "latent_grad_norm": jnp.linalg.norm(node_state.latent_grad),
-                "error_norm": jnp.linalg.norm(node_state.error),
+                "energy": jnp.mean(node_state.energy),
+                "latent_grad_norm": jnp.mean(
+                    jnp.linalg.norm(node_state.latent_grad, axis=-1)
+                ),
+                "error_norm": jnp.mean(jnp.linalg.norm(node_state.error, axis=-1)),
                 "z_latent_mean": jnp.mean(node_state.z_latent),
-                "z_latent_std": jnp.std(node_state.z_latent),
+                "z_latent_std": jnp.mean(jnp.std(node_state.z_latent, axis=-1)),
             }
             for node_name, node_state in new_state.nodes.items()
         }
@@ -76,11 +79,9 @@ def run_inference_with_history(
         length=infer_steps,
     )
 
-    # Unstack the metrics into a list
-    # all_metrics is a nested dict with stacked arrays
-    history = _unstack_metrics(all_metrics, collect_every)
-
-    return final_state, history
+    # Return stacked metrics - unstacking must happen outside JIT
+    # all_metrics is a nested dict with stacked arrays of shape (infer_steps,)
+    return final_state, all_metrics
 
 
 def _unstack_metrics(
@@ -162,14 +163,18 @@ def train_step_with_history(
 ) -> Tuple[
     GraphParams,
     optax.OptState,
-    float,
+    jnp.ndarray,
     GraphState,
-    List[Dict[str, Dict[str, float]]],
+    Dict[str, Dict[str, jnp.ndarray]],
 ]:
     """Training step that also returns inference history.
 
     This is a modified version of train_step that uses run_inference_with_history.
     Use this when you need to track inference dynamics.
+
+    Note: This function is designed to be JIT-compiled. The returned loss and
+    inference_history are JAX arrays. Use unstack_inference_history() to convert
+    the stacked metrics to a list of per-step dicts after the JIT call.
 
     Args:
         params: Current model parameters.
@@ -180,10 +185,12 @@ def train_step_with_history(
         rng_key: JAX random key for state initialization.
         infer_steps: Number of inference steps.
         eta_infer: Inference learning rate.
-        collect_every: Collect history every N inference steps.
+        collect_every: Collect history every N inference steps (note: currently
+            ignored inside JIT; subsample after with unstack_inference_history).
 
     Returns:
-        Tuple of (params, opt_state, loss, final_state, inference_history).
+        Tuple of (params, opt_state, energy, final_state, stacked_inference_history).
+        Call unstack_inference_history() on stacked_inference_history outside JIT.
     """
     from fabricpc.graph.state_initializer import initialize_graph_state
     from fabricpc.training.train import compute_local_weight_gradients
@@ -207,8 +214,8 @@ def train_step_with_history(
         params=params,
     )
 
-    # Run inference WITH history collection
-    final_state, inference_history = run_inference_with_history(
+    # Run inference WITH history collection (returns stacked metrics)
+    final_state, stacked_history = run_inference_with_history(
         params, init_state, clamps, structure, infer_steps, eta_infer, collect_every
     )
 
@@ -220,14 +227,32 @@ def train_step_with_history(
             if structure.nodes[node_name].in_degree > 0
         ]
     )
-    loss = float(energy)
 
     # Compute gradients and update
     grads = compute_local_weight_gradients(params, final_state, structure)
     updates, opt_state = optimizer.update(grads, opt_state, params)
     params = cast(GraphParams, optax.apply_updates(params, updates))
 
-    return params, opt_state, loss, final_state, inference_history
+    return params, opt_state, energy, final_state, stacked_history
+
+
+def unstack_inference_history(
+    stacked_metrics: Dict[str, Dict[str, jnp.ndarray]],
+    collect_every: int = 1,
+) -> List[Dict[str, Dict[str, float]]]:
+    """Convert stacked metrics from JIT to list of per-step dicts.
+
+    Call this function OUTSIDE of JIT on the stacked_inference_history
+    returned by train_step_with_history.
+
+    Args:
+        stacked_metrics: Dict of node -> metric -> stacked array (num_steps,)
+        collect_every: Subsample by taking every Nth step.
+
+    Returns:
+        List of dicts with per-step metrics as Python floats.
+    """
+    return _unstack_metrics(stacked_metrics, collect_every)
 
 
 def extract_history_for_plotting(

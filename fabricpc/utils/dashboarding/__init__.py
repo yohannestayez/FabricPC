@@ -56,6 +56,7 @@ from fabricpc.utils.dashboarding.inference_tracking import (
     run_inference_with_history,
     summarize_inference_convergence,
     train_step_with_history,
+    unstack_inference_history,
 )
 from fabricpc.utils.dashboarding.trackers import (
     AimExperimentTracker,
@@ -93,6 +94,7 @@ __all__ = [
     "run_inference_with_history",
     "run_inference_with_full_history",
     "train_step_with_history",
+    "unstack_inference_history",
     "extract_history_for_plotting",
     "summarize_inference_convergence",
 ]

@@ -29,10 +29,13 @@ There are various flavors of PC. FabricPC provides a graph-based implementation 
 ## Quick Start
 ```bash
 # Install in editable mode (recommended for development, and running examples)
-pip install -e ".[dev,torch,viz]"
+pip install -e ".[dev,tfds,viz]"
 
 # Install pre-commit hooks for code quality
 pre-commit install     
+
+# Start the Aim visualization server (optional)
+aim up
 
 # Run an example
 python examples/mnist_demo.py
@@ -57,7 +60,8 @@ This is a research-first project.
 - APIs may change frequently until v1.0 release.
 - Any breaking changes are documented in the changelog.
 
-## License: private until officially released. Please do not distribute.
+## License:
+Private until officially released. Please do not distribute.
 
 ## Extending FabricPC
 

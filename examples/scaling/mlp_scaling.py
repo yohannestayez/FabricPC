@@ -22,9 +22,7 @@ How it works:
 # TODO:
 Investigate node parallelization via vmap and pmap
 potential strategy during inference phase and weight learning update phase (independent over nodes):
-- vmap the nodes over batches within each device
-- pmap the nodes over multiple devices (if available)
-- potential strategy during initialization phase (sequential over layers):
+- vmap the nodes within each the device
 - pmap batch over multiple devices (if available) for data parallelism
 
   Current Implementation:
@@ -34,8 +32,8 @@ potential strategy during inference phase and weight learning update phase (inde
   - Topological ordering is computed and stored (structure.node_order) but not actively exploited
 
   Node Independence in Predictive Coding:
-  - Nodes within the same topological level are independent during forward pass
-  - Gradient accumulation phase has reduction dependencies (gradients flow backward)
+  - Nodes within the same topological level are independent during initialization forward pass
+  - Nodes are independent in gradient computation and reduction dependencies on outneighbor nodes only
   - Source nodes (in_degree == 0) are always independent
 """
 
@@ -92,7 +90,7 @@ class ScalingResult:
     depth: int
     num_params: int
     avg_step_time_ms: float
-    peak_memory_mb: float
+    memory_mb: float
     batch_size: int
     infer_steps: int
 
@@ -153,6 +151,7 @@ def create_mlp_config(
         "node_list": node_list,
         "edge_list": edge_list,
         "task_map": {"x": "input", "y": "output"},
+        "graph_state_initializer": {"type": "feedforward"},
     }
 
 
@@ -175,7 +174,7 @@ def generate_synthetic_data(
     return batches
 
 
-def get_peak_memory_bytes() -> int:
+def get_memory_bytes() -> int:
     """Get current GPU memory usage in bytes.
 
     Note: We use bytes_in_use (current) instead of peak_bytes_in_use because
@@ -227,8 +226,8 @@ def run_timed_training_pc(
         params, opt_state, _, _ = jit_train_step(params, opt_state, batch, keys[i])
     jax.block_until_ready(params)  # Force sync
 
-    # Measure peak memory after warmup (accurate in isolated subprocess)
-    peak_memory = get_peak_memory_bytes()
+    # Measure memory after warmup (accurate in isolated subprocess)
+    memory = get_memory_bytes()
 
     # Timed runs
     start_time = time.perf_counter()
@@ -242,7 +241,7 @@ def run_timed_training_pc(
 
     avg_step_time = (end_time - start_time) / num_steps
 
-    return avg_step_time, peak_memory
+    return avg_step_time, memory
 
 
 def run_timed_training_backprop(
@@ -275,8 +274,8 @@ def run_timed_training_backprop(
         params, opt_state, _ = jit_train_step(params, opt_state, batch, keys[i])
     jax.block_until_ready(params)  # Force sync
 
-    # Measure peak memory after warmup (accurate in isolated subprocess)
-    peak_memory = get_peak_memory_bytes()
+    # Measure memory after warmup (accurate in isolated subprocess)
+    memory = get_memory_bytes()
 
     # Timed runs
     start_time = time.perf_counter()
@@ -290,7 +289,7 @@ def run_timed_training_backprop(
 
     avg_step_time = (end_time - start_time) / num_steps
 
-    return avg_step_time, peak_memory
+    return avg_step_time, memory
 
 
 def count_params(params) -> int:
@@ -341,11 +340,11 @@ def run_single_experiment(
 
     # Run timed training based on mode
     if mode == "pc":
-        avg_time, peak_mem = run_timed_training_pc(
+        avg_time, mem = run_timed_training_pc(
             params, structure, batches, train_config, train_key, num_steps, num_warmup
         )
     else:
-        avg_time, peak_mem = run_timed_training_backprop(
+        avg_time, mem = run_timed_training_backprop(
             params, structure, batches, train_config, train_key, num_steps, num_warmup
         )
 
@@ -356,7 +355,7 @@ def run_single_experiment(
         depth=depth,
         num_params=num_params,
         avg_step_time_ms=avg_time * 1000,
-        peak_memory_mb=peak_mem / (1024 * 1024),
+        memory_mb=mem / (1024 * 1024),
         batch_size=batch_size,
         infer_steps=infer_steps,
     )
@@ -376,7 +375,7 @@ def run_experiment_subprocess(
     Run a single experiment in a subprocess for memory isolation.
 
     Each subprocess gets a fresh JAX memory pool, ensuring accurate
-    peak memory measurement per experiment.
+    memory measurement per experiment.
     """
     cmd = [
         sys.executable,
@@ -413,7 +412,7 @@ def run_experiment_subprocess(
             depth=depth,
             num_params=0,
             avg_step_time_ms=float("nan"),
-            peak_memory_mb=float("nan"),
+            memory_mb=float("nan"),
             batch_size=batch_size,
             infer_steps=infer_steps,
         )
@@ -431,7 +430,7 @@ def run_experiment_subprocess(
             depth=depth,
             num_params=0,
             avg_step_time_ms=float("nan"),
-            peak_memory_mb=float("nan"),
+            memory_mb=float("nan"),
             batch_size=batch_size,
             infer_steps=infer_steps,
         )
@@ -488,7 +487,7 @@ def run_all_experiments(
 
                 if result.num_params > 0:
                     print(
-                        f"params={result.num_params:,}, time={result.avg_step_time_ms:.2f}ms, mem={result.peak_memory_mb:.1f}MB"
+                        f"params={result.num_params:,}, time={result.avg_step_time_ms:.2f}ms, mem={result.memory_mb:.1f}MB"
                     )
 
     return results
@@ -535,7 +534,7 @@ def save_results_csv(results: List[ScalingResult], filename: str):
                 "depth",
                 "num_params",
                 "avg_step_time_ms",
-                "peak_memory_mb",
+                "memory_mb",
                 "batch_size",
                 "infer_steps",
             ],
@@ -558,7 +557,7 @@ def print_summary_table(results: List[ScalingResult]):
     for r in results:
         if r.num_params > 0:  # Skip failed experiments
             print(
-                f"{r.training_mode:<10} | {r.width:<7} | {r.depth:<6} | {r.num_params:<12,} | {r.avg_step_time_ms:<12.2f} | {r.peak_memory_mb:<12.1f}"
+                f"{r.training_mode:<10} | {r.width:<7} | {r.depth:<6} | {r.num_params:<12,} | {r.avg_step_time_ms:<12.2f} | {r.memory_mb:<12.1f}"
             )
     print("-" * 95)
 
@@ -618,7 +617,7 @@ def plot_results(results: List[ScalingResult], output_dir: str = "."):
     fig2 = px.line(
         df,
         x="width",
-        y="peak_memory_mb",
+        y="memory_mb",
         color="depth",
         symbol="training_mode",
         symbol_map=symbol_map,
@@ -628,7 +627,7 @@ def plot_results(results: List[ScalingResult], output_dir: str = "."):
         title="GPU Memory vs Width",
         labels={
             "width": "Width (hidden units)",
-            "peak_memory_mb": "Peak Memory (MB)",
+            "memory_mb": "Memory (MB)",
             "depth": "Depth",
             "training_mode": "Mode",
         },
@@ -674,7 +673,7 @@ def plot_results(results: List[ScalingResult], output_dir: str = "."):
     fig4 = px.line(
         df,
         x="depth",
-        y="peak_memory_mb",
+        y="memory_mb",
         color="width",
         symbol="training_mode",
         symbol_map=symbol_map,
@@ -684,7 +683,7 @@ def plot_results(results: List[ScalingResult], output_dir: str = "."):
         title="GPU Memory vs Depth",
         labels={
             "depth": "Depth (layers)",
-            "peak_memory_mb": "Peak Memory (MB)",
+            "memory_mb": "Memory (MB)",
             "width": "Width",
             "training_mode": "Mode",
         },

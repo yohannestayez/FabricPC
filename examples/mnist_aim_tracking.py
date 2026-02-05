@@ -20,23 +20,22 @@ Requirements:
     pip install fabricpc[viz]  # Includes aim
 """
 
-import os
+import os  # set environment variables before importing JAX
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-os.environ.setdefault("JAX_PLATFORMS", "cuda")
+os.environ.setdefault(
+    "JAX_PLATFORMS", "cuda"
+)  # options: "cpu", "cuda" or "tpu" if available
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
 
 import time
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+from fabricpc.utils.data.dataloader import MnistLoader
 
 from fabricpc.graph import create_pc_graph
 from fabricpc.training import create_optimizer, evaluate_pcn
-from fabricpc.training.data_utils import OneHotWrapper
 
 # Import dashboarding utilities
 from fabricpc.utils.dashboarding import (
@@ -44,6 +43,7 @@ from fabricpc.utils.dashboarding import (
     TrackingConfig,
     is_aim_available,
     train_step_with_history,
+    unstack_inference_history,
     summarize_inference_convergence,
 )
 
@@ -60,8 +60,6 @@ else:
 jax.config.update("jax_default_prng_impl", "threefry2x32")
 master_rng_key = jax.random.PRNGKey(42)
 graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
-torch.manual_seed(0)
-np.random.seed(0)
 
 # ==============================================================================
 # NETWORK CONFIGURATION
@@ -111,7 +109,7 @@ train_config = {
     "optimizer": {"type": "adam", "lr": 0.001, "weight_decay": 0.001},
 }
 batch_size = 200
-num_epochs = 10
+num_epochs = 5
 
 # ==============================================================================
 # CREATE MODEL
@@ -134,25 +132,15 @@ print(f"  Total parameters: {num_params:,}")
 
 print(f"\n[Data Loading]")
 
-transform = transforms.Compose(
-    [
-        transforms.ToTensor(),
-        transforms.Lambda(lambda x_dat: x_dat.view(-1)),
-    ]
+train_loader = MnistLoader(
+    "train", batch_size=batch_size, tensor_format="flat", shuffle=True, seed=42
+)
+test_loader = MnistLoader(
+    "test", batch_size=batch_size, tensor_format="flat", shuffle=False
 )
 
-train_data = datasets.MNIST("./data", train=True, download=True, transform=transform)
-test_data = datasets.MNIST("./data", train=False, download=True, transform=transform)
-
-train_loader = OneHotWrapper(
-    DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2)
-)
-test_loader = OneHotWrapper(
-    DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=2)
-)
-
-print(f"  Train samples: {len(train_data):,}")
-print(f"  Test samples: {len(test_data):,}")
+print(f"  Train samples: {train_loader.num_examples:,}")
+print(f"  Test samples: {test_loader.num_examples:,}")
 print(f"  Batch size: {batch_size}")
 
 # ==============================================================================
@@ -256,10 +244,13 @@ for epoch in range(num_epochs):
     for batch_idx, (x, y) in enumerate(train_loader):
         batch = {"x": jnp.array(x), "y": y}
 
-        # Training step with inference history
-        params, opt_state, loss, final_state, inference_history = jit_train_step(
+        # Training step with inference history (returns stacked metrics)
+        params, opt_state, loss, final_state, stacked_history = jit_train_step(
             params, opt_state, batch, all_rng_keys[epoch, batch_idx]
         )
+
+        # Unstack inference history outside of JIT (converts JAX arrays to Python floats)
+        inference_history = unstack_inference_history(stacked_history, collect_every=5)
 
         normalized_loss = float(loss) / batch_size
         epoch_losses.append(normalized_loss)

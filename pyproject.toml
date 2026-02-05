@@ -42,9 +42,9 @@ dev = [
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
 ]
-torch = [
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
+tfds = [
+    "tensorflow-datasets>=4.9.0",
+    "tensorflow>=2.15.0",
 ]
 viz = [
     "plotly>=5.0.0",

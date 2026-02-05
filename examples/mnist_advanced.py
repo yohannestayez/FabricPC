@@ -3,36 +3,36 @@ ADVANCED Predictive Coding Network Example
 =================================================
 
 This example demonstrates:
-1. Deeper network architectures
+1. Explicit network config dictionary (no defaults)
 2. Custom training configurations
 3. Progress monitoring and checkpointing
 4. Hyperparameter exploration
 
 Compared to mnist_demo.py, this shows a customizable training loop
 """
-import os
+
+import os  # set environment variables before importing JAX
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-os.environ.setdefault("JAX_PLATFORMS", "cuda")
+os.environ.setdefault(
+    "JAX_PLATFORMS", "cuda"
+)  # options: "cpu", "cuda" or "tpu" if available
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
 
 import jax
 import jax.numpy as jnp
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 import time
 
 from fabricpc.graph import create_pc_graph
 from fabricpc.training import train_step, create_optimizer, evaluate_pcn
-from fabricpc.training.data_utils import OneHotWrapper
+from fabricpc.utils.data.dataloader import MnistLoader
 
 # Set random seed and split for different stages
-jax.config.update('jax_default_prng_impl', 'threefry2x32')  # 'rbg' is faster than 'threefry2x32', but less reproducible across vmaps
+jax.config.update(
+    "jax_default_prng_impl", "threefry2x32"
+)  # 'rbg' is faster than 'threefry2x32', but less reproducible across vmaps
 master_rng_key = jax.random.PRNGKey(42)
 graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
-import torch
-import numpy as np
-# Set seeds for torch data loaders
-torch.manual_seed(0)
-np.random.seed(0)
 
 # ==============================================================================
 # ADVANCED NETWORK CONFIGURATION - FULLY EXPLICIT (NO DEFAULTS)
@@ -42,7 +42,7 @@ np.random.seed(0)
 # Detailed node configuration template
 template_node = {
     "name": None,   # To be filled -> str
-    "shape": None,  # To be filled -> tuple of ints
+    "shape": None,  # To be filled -> tuple of ints for tensor shape. The batch as first dimension is implicit. Specify only dimensions following batch.
     "type": "linear",
     "activation": {"type": "sigmoid"},
     "energy": {"type": "gaussian", "precision": 1.0},
@@ -105,9 +105,9 @@ num_epochs = 10
 # CREATE MODEL
 # ==============================================================================
 
-print("="*70)
+print("=" * 70)
 print("Predictive Coding - Advanced MNIST Example")
-print("="*70)
+print("=" * 70)
 
 params, structure = create_pc_graph(config, graph_key)
 num_params = sum(p.size for p in jax.tree_util.tree_leaves(params))
@@ -117,7 +117,7 @@ print(f"  Nodes: {len(config['node_list'])}")
 print(f"  Edges: {len(config['edge_list'])}")
 print(f"  Total parameters: {num_params:,}")
 print(f"\n  Layer sizes: ", end="")
-for node in config['node_list']:
+for node in config["node_list"]:
     print(f"{node['shape']} → ", end="")
 print("(output)")
 
@@ -127,23 +127,15 @@ print("(output)")
 
 print(f"\n[Data Loading]")
 
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Lambda(lambda x_dat: x_dat.view(-1)),
-])
+train_loader = MnistLoader(
+    "train", batch_size=batch_size, tensor_format="flat", shuffle=True, seed=42
+)
+test_loader = MnistLoader(
+    "test", batch_size=batch_size, tensor_format="flat", shuffle=False
+)
 
-train_data = datasets.MNIST('./data', train=True, download=True, transform=transform)
-test_data = datasets.MNIST('./data', train=False, download=True, transform=transform)
-
-train_loader = OneHotWrapper(DataLoader(
-    train_data, batch_size=batch_size, shuffle=True, num_workers=2
-))
-test_loader = OneHotWrapper(DataLoader(
-    test_data, batch_size=batch_size, shuffle=False, num_workers=2
-))
-
-print(f"  Train samples: {len(train_data):,}")
-print(f"  Test samples: {len(test_data):,}")
+print(f"  Train samples: {train_loader.num_examples:,}")
+print(f"  Test samples: {test_loader.num_examples:,}")
 print(f"  Batch size: {batch_size}")
 print(f"  Train batches: {len(train_loader)}")
 
@@ -158,17 +150,19 @@ print(f"  Weight decay: {train_config['optimizer']['weight_decay']}")
 print(f"  Inference steps: {train_config['infer_steps']}")
 print(f"  Inference eta: {train_config['eta_infer']}")
 
-infer_steps = train_config['infer_steps']
-eta_infer = train_config['eta_infer']
+infer_steps = train_config["infer_steps"]
+eta_infer = train_config["eta_infer"]
 
 # Create optimizer
-optimizer = create_optimizer(train_config['optimizer'])
+optimizer = create_optimizer(train_config["optimizer"])
 opt_state = optimizer.init(params)
 
 # JIT compile training step
 print(f"\n[Compiling JIT functions...]")
 jit_train_step = jax.jit(
-    lambda p, o, b, k: train_step(p, o, b, structure, optimizer, k, infer_steps, eta_infer)
+    lambda p, o, b, k: train_step(
+        p, o, b, structure, optimizer, k, infer_steps, eta_infer
+    )
 )
 
 # Training loop with detailed monitoring
@@ -192,14 +186,20 @@ for epoch in range(num_epochs):
         batch = {"x": jnp.array(x), "y": y}
 
         # Training step with unique rng_key
-        params, opt_state, energy, _ = jit_train_step(params, opt_state, batch, all_rng_keys[epoch, batch_idx])
+        params, opt_state, energy, _ = jit_train_step(
+            params, opt_state, batch, all_rng_keys[epoch, batch_idx]
+        )
         epoch_energies.append(float(energy))
 
         # Progress indicator every n_batch_update batches
         n_batch_update = 100
         if (batch_idx + 1) % n_batch_update == 0:
-            avg_energy = sum(epoch_energies[-n_batch_update:]) / len(epoch_energies[-n_batch_update:])
-            print(f"  Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_loader)}, energy: {avg_energy:.4f}")
+            avg_energy = sum(epoch_energies[-n_batch_update:]) / len(
+                epoch_energies[-n_batch_update:]
+            )
+            print(
+                f"  Epoch {epoch+1}/{num_epochs}, Batch {batch_idx+1}/{len(train_loader)}, energy: {avg_energy:.4f}"
+            )
 
     epoch_time = time.time() - epoch_start
     avg_energy = sum(epoch_energies) / len(epoch_energies)
@@ -207,7 +207,7 @@ for epoch in range(num_epochs):
     # Evaluate on test set with unique eval key for this epoch
     epoch_eval_key, eval_key = jax.random.split(eval_key)
     metrics = evaluate_pcn(params, structure, test_loader, train_config, epoch_eval_key)
-    accuracy = metrics['accuracy'] * 100  # convert to percentage
+    accuracy = metrics["accuracy"] * 100  # convert to percentage
 
     # Track best model
     if accuracy > best_accuracy:
@@ -215,14 +215,18 @@ for epoch in range(num_epochs):
         best_params = params
         print(f"  ★ New best accuracy: {accuracy:.2f}%")
 
-    print(f"  Epoch {epoch+1}/{num_epochs} - energy: {avg_energy:.4f}, Accuracy: {accuracy:.2f}%, Time: {epoch_time:.1f}s")
+    print(
+        f"  Epoch {epoch+1}/{num_epochs} - energy: {avg_energy:.4f}, Accuracy: {accuracy:.2f}%, Time: {epoch_time:.1f}s"
+    )
 
-    training_history.append({
-        'epoch': epoch + 1,
-        'energy': avg_energy,
-        'accuracy': accuracy,
-        'time': epoch_time
-    })
+    training_history.append(
+        {
+            "epoch": epoch + 1,
+            "energy": avg_energy,
+            "accuracy": accuracy,
+            "time": epoch_time,
+        }
+    )
 
 # ==============================================================================
 # FINAL EVALUATION
@@ -238,9 +242,11 @@ print(f"\n[Training History]")
 print("  Epoch | Energy    | Accuracy | Time")
 print("  ------|---------|----------|------")
 for h in training_history:
-    print(f"  {h['epoch']:5d} | {h['energy']:7.4f} | {h['accuracy']:7.2f}% | {h['time']:4.1f}s")
+    print(
+        f"  {h['epoch']:5d} | {h['energy']:7.4f} | {h['accuracy']:7.2f}% | {h['time']:4.1f}s"
+    )
 
-print("\n" + "="*70)
+print("\n" + "=" * 70)
 print("Advanced Training Complete!")
 print("\nKey takeaways:")
 print("  ✓ JIT compilation makes training fast")
@@ -249,4 +255,4 @@ print("\nNext steps:")
 print("  - Try even deeper architectures")
 print("  - Experiment with different optimizers")
 print("  - Add learning rate scheduling")
-print("="*70)
+print("=" * 70)
