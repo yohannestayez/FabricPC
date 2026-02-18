@@ -11,6 +11,7 @@ Tests:
 """
 
 import os
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_TRACEBACK_FILTERING", "off")
 
@@ -44,7 +45,12 @@ def simple_graph_config():
     return {
         "node_list": [
             {"name": "input", "shape": (784,), "type": "linear"},
-            {"name": "hidden", "shape": (128,), "type": "linear", "activation": {"type": "relu"}},
+            {
+                "name": "hidden",
+                "shape": (128,),
+                "type": "linear",
+                "activation": {"type": "relu"},
+            },
             {"name": "output", "shape": (10,), "type": "linear"},
         ],
         "edge_list": [
@@ -77,8 +83,12 @@ class TestStateInitRegistry:
 
     def test_get_state_init_class_case_insensitive(self):
         """Test that type lookup is case-insensitive."""
-        assert get_state_init_class("node_Distribution") == get_state_init_class("node_distribution")
-        assert get_state_init_class("FEEDFORWARD") == get_state_init_class("feedforward")
+        assert get_state_init_class("node_Distribution") == get_state_init_class(
+            "node_distribution"
+        )
+        assert get_state_init_class("FEEDFORWARD") == get_state_init_class(
+            "feedforward"
+        )
 
     def test_get_unknown_type_raises(self):
         """Test that unknown type raises ValueError."""
@@ -99,11 +109,14 @@ class TestDistributionStateInit:
         clamps = {"input": x, "output": y}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={
                 "type": "global",
-                "initializer": {"type": "normal", "std": 0.1}
-            }
+                "initializer": {"type": "normal", "std": 0.1},
+            },
         )
 
         # Verify state structure
@@ -132,11 +145,11 @@ class TestDistributionStateInit:
         clamps = {"input": x, "output": y}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
-            state_init_config={
-                "type": "global",
-                "initializer": {"type": "zeros"}
-            }
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
+            state_init_config={"type": "global", "initializer": {"type": "zeros"}},
         )
 
         # Hidden should be all zeros
@@ -152,7 +165,7 @@ class TestDistributionStateInit:
                     "shape": (16,),
                     "type": "linear",
                     "activation": {"type": "relu"},
-                    "latent_init": {"type": "uniform", "min": -1.0, "max": 1.0}
+                    "latent_init": {"type": "uniform", "min": -1.0, "max": 1.0},
                 },
                 {"name": "output", "shape": (8,), "type": "linear"},
             ],
@@ -171,10 +184,13 @@ class TestDistributionStateInit:
         clamps = {"input": x, "output": y}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={
                 "type": "node_distribution",
-            }
+            },
         )
 
         # Hidden should be uniform(-1, 1) due to node-level override
@@ -198,9 +214,12 @@ class TestFeedforwardStateInit:
 
         with pytest.raises(ValueError, match="requires params"):
             initialize_graph_state(
-                structure, batch_size, rng_key, clamps,
+                structure,
+                batch_size,
+                rng_key,
+                clamps,
                 state_init_config={"type": "feedforward"},
-                params=None  # No params provided
+                params=None,  # No params provided
             )
 
     def test_feedforward_init_with_params(self, simple_graph_config, rng_key):
@@ -213,9 +232,12 @@ class TestFeedforwardStateInit:
         clamps = {"input": x, "output": y}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # Verify state structure
@@ -234,9 +256,24 @@ class TestFeedforwardStateInit:
         config = {
             "node_list": [
                 {"name": "input", "shape": (32,), "type": "linear"},
-                {"name": "h1", "shape": (16,), "type": "linear", "activation": {"type": "relu"}},
-                {"name": "h2", "shape": (16,), "type": "linear", "activation": {"type": "relu"}},
-                {"name": "h3", "shape": (8,), "type": "linear", "activation": {"type": "relu"}},
+                {
+                    "name": "h1",
+                    "shape": (16,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
+                {
+                    "name": "h2",
+                    "shape": (16,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
+                {
+                    "name": "h3",
+                    "shape": (8,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (4,), "type": "linear"},
             ],
             "edge_list": [
@@ -256,15 +293,19 @@ class TestFeedforwardStateInit:
         clamps = {"input": x, "output": y}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # All intermediate nodes should have non-trivial values
         for name in ["h1", "h2", "h3"]:
-            assert not jnp.allclose(state.nodes[name].z_latent, 0.0), \
-                f"Node {name} should have non-zero z_latent after feedforward init"
+            assert not jnp.allclose(
+                state.nodes[name].z_latent, 0.0
+            ), f"Node {name} should have non-zero z_latent after feedforward init"
 
 
 class TestClampHandling:
@@ -280,8 +321,11 @@ class TestClampHandling:
         clamps = {"input": x, "output": y}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
-            state_init_config={"type": "node_distribution"}
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
+            state_init_config={"type": "node_distribution"},
         )
 
         # Clamped nodes should have exact clamped values
@@ -298,9 +342,12 @@ class TestClampHandling:
         clamps = {"input": x, "output": y}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # Clamped nodes should have exact clamped values
@@ -316,9 +363,12 @@ class TestClampHandling:
         clamps = {"input": x}  # Only input clamped
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # Input should be clamped
@@ -343,9 +393,7 @@ class TestConvenienceFunctions:
 
         # Use the convenience function
         state = initialize_graph_state(
-            structure, batch_size, rng_key,
-            clamps=clamps,
-            params=params
+            structure, batch_size, rng_key, clamps=clamps, params=params
         )
 
         assert state.batch_size == batch_size
@@ -359,14 +407,15 @@ class TestCustomStateInit:
 
     def test_register_custom_state_init(self, simple_graph_config, rng_key):
         """Test registering and using a custom state initializer."""
+
         @register_state_init("test_custom_state")
         class TestCustomStateInit(StateInitBase):
-            CONFIG_SCHEMA = {
-                "fill_value": {"type": (int, float), "default": 99.0}
-            }
+            CONFIG_SCHEMA = {"fill_value": {"type": (int, float), "default": 99.0}}
 
             @staticmethod
-            def initialize_state(structure, batch_size, rng_key, clamps, config, params=None):
+            def initialize_state(
+                structure, batch_size, rng_key, clamps, config, params=None
+            ):
                 from fabricpc.core.types import GraphState, NodeState
 
                 fill_value = config.get("fill_value", 99.0)
@@ -404,8 +453,11 @@ class TestCustomStateInit:
             clamps = {"input": x, "output": y}
 
             state = initialize_graph_state(
-                structure, batch_size, rng_key, clamps,
-                state_init_config={"type": "test_custom_state", "fill_value": 42.0}
+                structure,
+                batch_size,
+                rng_key,
+                clamps,
+                state_init_config={"type": "test_custom_state", "fill_value": 42.0},
             )
 
             # Hidden should be filled with 42.0
@@ -427,9 +479,24 @@ class TestFeedforwardZeroError:
         config = {
             "node_list": [
                 {"name": "input", "shape": (32,), "type": "linear"},
-                {"name": "h1", "shape": (64,), "type": "linear", "activation": {"type": "relu"}},
-                {"name": "h2", "shape": (32,), "type": "linear", "activation": {"type": "relu"}},
-                {"name": "output", "shape": (10,), "type": "linear", "activation": {"type": "softmax"}},
+                {
+                    "name": "h1",
+                    "shape": (64,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
+                {
+                    "name": "h2",
+                    "shape": (32,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
+                {
+                    "name": "output",
+                    "shape": (10,),
+                    "type": "linear",
+                    "activation": {"type": "softmax"},
+                },
             ],
             "edge_list": [
                 {"source_name": "input", "target_name": "h1", "slot": "in"},
@@ -446,23 +513,28 @@ class TestFeedforwardZeroError:
         clamps = {"input": x}  # Only clamp input, not output
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # Verify that error is zero at all nodes after feedforward init
         for node_name in structure.nodes:
             error = state.nodes[node_name].error
-            assert jnp.allclose(error, 0.0, atol=1e-6), \
-                f"Node {node_name} has non-zero error after feedforward init: max={jnp.max(jnp.abs(error))}"
+            assert jnp.allclose(
+                error, 0.0, atol=1e-6
+            ), f"Node {node_name} has non-zero error after feedforward init: max={jnp.max(jnp.abs(error))}"
 
             # Also verify z_latent == z_mu for non-clamped nodes
             if node_name not in clamps:
                 z_latent = state.nodes[node_name].z_latent
                 z_mu = state.nodes[node_name].z_mu
-                assert jnp.allclose(z_latent, z_mu, atol=1e-6), \
-                    f"Node {node_name}: z_latent != z_mu after feedforward init"
+                assert jnp.allclose(
+                    z_latent, z_mu, atol=1e-6
+                ), f"Node {node_name}: z_latent != z_mu after feedforward init"
 
     def test_feedforward_zero_error_transformer(self, rng_key):
         """Test that feedforward init produces zero error for transformer architecture."""
@@ -529,24 +601,29 @@ class TestFeedforwardZeroError:
         clamps = {"input": x, "mask": causal_mask}
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # Verify that error is zero at all nodes after feedforward init
         for node_name in structure.nodes:
             error = state.nodes[node_name].error
             max_error = jnp.max(jnp.abs(error))
-            assert jnp.allclose(error, 0.0, atol=1e-5), \
-                f"Node {node_name} has non-zero error after feedforward init: max={max_error}"
+            assert jnp.allclose(
+                error, 0.0, atol=1e-5
+            ), f"Node {node_name} has non-zero error after feedforward init: max={max_error}"
 
             # Also verify z_latent == z_mu for non-clamped nodes
             if node_name not in clamps:
                 z_latent = state.nodes[node_name].z_latent
                 z_mu = state.nodes[node_name].z_mu
-                assert jnp.allclose(z_latent, z_mu, atol=1e-5), \
-                    f"Node {node_name}: z_latent != z_mu after feedforward init"
+                assert jnp.allclose(
+                    z_latent, z_mu, atol=1e-5
+                ), f"Node {node_name}: z_latent != z_mu after feedforward init"
 
     def test_feedforward_no_change_after_inference_without_output_clamp(self, rng_key):
         """
@@ -558,7 +635,12 @@ class TestFeedforwardZeroError:
         config = {
             "node_list": [
                 {"name": "input", "shape": (16,), "type": "linear"},
-                {"name": "hidden", "shape": (32,), "type": "linear", "activation": {"type": "relu"}},
+                {
+                    "name": "hidden",
+                    "shape": (32,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (8,), "type": "linear"},
             ],
             "edge_list": [
@@ -575,21 +657,22 @@ class TestFeedforwardZeroError:
         clamps = {"input": x}  # Only clamp input, no output clamp
 
         state = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # Save original latent states
         original_latents = {
-            name: state.nodes[name].z_latent
-            for name in structure.nodes
+            name: state.nodes[name].z_latent for name in structure.nodes
         }
 
         # Run inference with no output clamp
         final_state = run_inference(
-            params, state, clamps, structure,
-            infer_steps=10, eta_infer=0.1
+            params, state, clamps, structure, infer_steps=10, eta_infer=0.1
         )
 
         # Latent states should not have changed since error was zero
@@ -597,8 +680,9 @@ class TestFeedforwardZeroError:
             original = original_latents[node_name]
             final = final_state.nodes[node_name].z_latent
             max_diff = jnp.max(jnp.abs(original - final))
-            assert jnp.allclose(original, final, atol=1e-5), \
-                f"Node {node_name} changed after inference despite zero error: max_diff={max_diff}"
+            assert jnp.allclose(
+                original, final, atol=1e-5
+            ), f"Node {node_name} changed after inference despite zero error: max_diff={max_diff}"
 
 
 class TestStateInitDeterminism:
@@ -612,18 +696,23 @@ class TestStateInitDeterminism:
         clamps = {}
 
         state1 = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
-            state_init_config={"type": "node_distribution"}
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
+            state_init_config={"type": "node_distribution"},
         )
         state2 = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
-            state_init_config={"type": "node_distribution"}
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
+            state_init_config={"type": "node_distribution"},
         )
 
         # Should produce identical results
         assert jnp.allclose(
-            state1.nodes["hidden"].z_latent,
-            state2.nodes["hidden"].z_latent
+            state1.nodes["hidden"].z_latent, state2.nodes["hidden"].z_latent
         )
 
     def test_feedforward_init_deterministic(self, simple_graph_config, rng_key):
@@ -636,18 +725,23 @@ class TestStateInitDeterminism:
         clamps = {"input": x, "output": y}
 
         state1 = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
         state2 = initialize_graph_state(
-            structure, batch_size, rng_key, clamps,
+            structure,
+            batch_size,
+            rng_key,
+            clamps,
             state_init_config={"type": "feedforward"},
-            params=params
+            params=params,
         )
 
         # Should produce identical results
         assert jnp.allclose(
-            state1.nodes["hidden"].z_latent,
-            state2.nodes["hidden"].z_latent
+            state1.nodes["hidden"].z_latent, state2.nodes["hidden"].z_latent
         )

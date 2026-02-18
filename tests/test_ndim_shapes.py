@@ -11,6 +11,7 @@ This test suite verifies:
 """
 
 import os
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_TRACEBACK_FILTERING", "off")
 
@@ -42,7 +43,12 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "input", "shape": (784,), "type": "linear"},
-                {"name": "hidden", "shape": (256,), "type": "linear", "activation": {"type": "relu"}},
+                {
+                    "name": "hidden",
+                    "shape": (256,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -61,10 +67,16 @@ class TestNDimShapes:
 
         # Verify weight shapes (flattened for linear)
         hidden_weights = params.nodes["hidden"].weights["input->hidden:in"]
-        assert hidden_weights.shape == (784, 256), f"Expected (784, 256), got {hidden_weights.shape}"
+        assert hidden_weights.shape == (
+            784,
+            256,
+        ), f"Expected (784, 256), got {hidden_weights.shape}"
 
         output_weights = params.nodes["output"].weights["hidden->output:in"]
-        assert output_weights.shape == (256, 10), f"Expected (256, 10), got {output_weights.shape}"
+        assert output_weights.shape == (
+            256,
+            10,
+        ), f"Expected (256, 10), got {output_weights.shape}"
 
         # Run inference
         batch_size = 8
@@ -72,8 +84,12 @@ class TestNDimShapes:
         y = jax.random.normal(rng_key, (batch_size, 10))
         clamps = {"input": x, "output": y}
 
-        state = initialize_graph_state(structure, batch_size, rng_key, clamps=clamps, params=params)
-        final_state = run_inference(params, state, clamps, structure, infer_steps=5, eta_infer=0.1)
+        state = initialize_graph_state(
+            structure, batch_size, rng_key, clamps=clamps, params=params
+        )
+        final_state = run_inference(
+            params, state, clamps, structure, infer_steps=5, eta_infer=0.1
+        )
 
         # Verify output shapes
         assert final_state.nodes["hidden"].z_latent.shape == (batch_size, 256)
@@ -84,7 +100,13 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden", "shape": (128,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
+                {
+                    "name": "hidden",
+                    "shape": (128,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -102,12 +124,18 @@ class TestNDimShapes:
 
         # Verify weight shapes - input is flattened (28*28=784)
         hidden_weights = params.nodes["hidden"].weights["image->hidden:in"]
-        assert hidden_weights.shape == (784, 128), f"Expected (784, 128), got {hidden_weights.shape}"
+        assert hidden_weights.shape == (
+            784,
+            128,
+        ), f"Expected (784, 128), got {hidden_weights.shape}"
 
         # Verify bias shape for 2D output
         # (Note: hidden has 1D shape, so bias is (1, 128))
         hidden_bias = params.nodes["hidden"].biases["b"]
-        assert hidden_bias.shape == (1, 128), f"Expected (1, 128), got {hidden_bias.shape}"
+        assert hidden_bias.shape == (
+            1,
+            128,
+        ), f"Expected (1, 128), got {hidden_bias.shape}"
 
         # Run inference with 2D input
         batch_size = 4
@@ -115,8 +143,12 @@ class TestNDimShapes:
         y = jax.random.normal(rng_key, (batch_size, 10))
         clamps = {"image": x, "output": y}
 
-        state = initialize_graph_state(structure, batch_size, rng_key, clamps=clamps, params=params)
-        final_state = run_inference(params, state, clamps, structure, infer_steps=5, eta_infer=0.1)
+        state = initialize_graph_state(
+            structure, batch_size, rng_key, clamps=clamps, params=params
+        )
+        final_state = run_inference(
+            params, state, clamps, structure, infer_steps=5, eta_infer=0.1
+        )
 
         # Verify state shapes
         assert final_state.nodes["image"].z_latent.shape == (batch_size, 28, 28)
@@ -128,7 +160,13 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28, 1), "type": "linear"},
-                {"name": "hidden", "shape": (64,), "type": "linear", "flatten_input": True, "activation": {"type": "tanh"}},
+                {
+                    "name": "hidden",
+                    "shape": (64,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "tanh"},
+                },
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -145,7 +183,10 @@ class TestNDimShapes:
 
         # Verify weight shapes - input is flattened (28*28*1=784)
         hidden_weights = params.nodes["hidden"].weights["image->hidden:in"]
-        assert hidden_weights.shape == (784, 64), f"Expected (784, 64), got {hidden_weights.shape}"
+        assert hidden_weights.shape == (
+            784,
+            64,
+        ), f"Expected (784, 64), got {hidden_weights.shape}"
 
         # Run inference with 3D input (NHWC format)
         batch_size = 4
@@ -153,8 +194,12 @@ class TestNDimShapes:
         y = jax.random.normal(rng_key, (batch_size, 10))
         clamps = {"image": x, "output": y}
 
-        state = initialize_graph_state(structure, batch_size, rng_key, clamps=clamps, params=params)
-        final_state = run_inference(params, state, clamps, structure, infer_steps=5, eta_infer=0.1)
+        state = initialize_graph_state(
+            structure, batch_size, rng_key, clamps=clamps, params=params
+        )
+        final_state = run_inference(
+            params, state, clamps, structure, infer_steps=5, eta_infer=0.1
+        )
 
         # Verify state shapes
         assert final_state.nodes["image"].z_latent.shape == (batch_size, 28, 28, 1)
@@ -165,7 +210,13 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "rgb_image", "shape": (32, 32, 3), "type": "linear"},
-                {"name": "hidden", "shape": (256,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
+                {
+                    "name": "hidden",
+                    "shape": (256,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (100,), "type": "linear"},
             ],
             "edge_list": [
@@ -182,7 +233,10 @@ class TestNDimShapes:
 
         # Verify weight shapes - input is flattened (32*32*3=3072)
         hidden_weights = params.nodes["hidden"].weights["rgb_image->hidden:in"]
-        assert hidden_weights.shape == (3072, 256), f"Expected (3072, 256), got {hidden_weights.shape}"
+        assert hidden_weights.shape == (
+            3072,
+            256,
+        ), f"Expected (3072, 256), got {hidden_weights.shape}"
 
         # Run inference
         batch_size = 2
@@ -190,8 +244,12 @@ class TestNDimShapes:
         y = jax.random.normal(rng_key, (batch_size, 100))
         clamps = {"rgb_image": x, "output": y}
 
-        state = initialize_graph_state(structure, batch_size, rng_key, clamps=clamps, params=params)
-        final_state = run_inference(params, state, clamps, structure, infer_steps=3, eta_infer=0.1)
+        state = initialize_graph_state(
+            structure, batch_size, rng_key, clamps=clamps, params=params
+        )
+        final_state = run_inference(
+            params, state, clamps, structure, infer_steps=3, eta_infer=0.1
+        )
 
         assert final_state.nodes["rgb_image"].z_latent.shape == (batch_size, 32, 32, 3)
 
@@ -200,8 +258,19 @@ class TestNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden1", "shape": (256,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
-                {"name": "hidden2", "shape": (128,), "type": "linear", "activation": {"type": "relu"}},
+                {
+                    "name": "hidden1",
+                    "shape": (256,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "relu"},
+                },
+                {
+                    "name": "hidden2",
+                    "shape": (128,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -233,8 +302,12 @@ class TestNDimShapes:
         y = jax.random.normal(rng_key, (batch_size, 10))
         clamps = {"image": x, "output": y}
 
-        state = initialize_graph_state(structure, batch_size, rng_key, clamps=clamps, params=params)
-        final_state = run_inference(params, state, clamps, structure, infer_steps=5, eta_infer=0.1)
+        state = initialize_graph_state(
+            structure, batch_size, rng_key, clamps=clamps, params=params
+        )
+        final_state = run_inference(
+            params, state, clamps, structure, infer_steps=5, eta_infer=0.1
+        )
 
         # Verify all intermediate shapes
         assert final_state.nodes["image"].z_latent.shape == (batch_size, 28, 28)
@@ -251,7 +324,12 @@ class TestSameParamsDifferentBatchSizes:
         config = {
             "node_list": [
                 {"name": "input", "shape": (784,), "type": "linear"},
-                {"name": "hidden", "shape": (128,), "type": "linear", "activation": {"type": "relu"}},
+                {
+                    "name": "hidden",
+                    "shape": (128,),
+                    "type": "linear",
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -272,29 +350,46 @@ class TestSameParamsDifferentBatchSizes:
             clamps = {"input": x, "output": y}
 
             # Initialize state with this batch size
-            state = initialize_graph_state(structure, batch_size, key, clamps=clamps, params=params)
+            state = initialize_graph_state(
+                structure, batch_size, key, clamps=clamps, params=params
+            )
 
             # Run inference
-            final_state = run_inference(params, state, clamps, structure, infer_steps=5, eta_infer=0.1)
+            final_state = run_inference(
+                params, state, clamps, structure, infer_steps=5, eta_infer=0.1
+            )
 
             # Verify shapes
-            assert final_state.nodes["input"].z_latent.shape == (batch_size, 784), \
-                f"Failed for batch_size={batch_size}"
-            assert final_state.nodes["hidden"].z_latent.shape == (batch_size, 128), \
-                f"Failed for batch_size={batch_size}"
-            assert final_state.nodes["output"].z_latent.shape == (batch_size, 10), \
-                f"Failed for batch_size={batch_size}"
+            assert final_state.nodes["input"].z_latent.shape == (
+                batch_size,
+                784,
+            ), f"Failed for batch_size={batch_size}"
+            assert final_state.nodes["hidden"].z_latent.shape == (
+                batch_size,
+                128,
+            ), f"Failed for batch_size={batch_size}"
+            assert final_state.nodes["output"].z_latent.shape == (
+                batch_size,
+                10,
+            ), f"Failed for batch_size={batch_size}"
 
             # Verify no NaN values
-            assert not jnp.any(jnp.isnan(final_state.nodes["hidden"].z_latent)), \
-                f"NaN values for batch_size={batch_size}"
+            assert not jnp.any(
+                jnp.isnan(final_state.nodes["hidden"].z_latent)
+            ), f"NaN values for batch_size={batch_size}"
 
     def test_same_params_2d_input_multiple_batch_sizes(self, rng_key):
         """Verify same params work with 2D inputs and different batch sizes."""
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden", "shape": (64,), "type": "linear", "flatten_input": True, "activation": {"type": "tanh"}},
+                {
+                    "name": "hidden",
+                    "shape": (64,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "tanh"},
+                },
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -314,8 +409,12 @@ class TestSameParamsDifferentBatchSizes:
             y = jax.random.normal(key, (batch_size, 10))
             clamps = {"image": x, "output": y}
 
-            state = initialize_graph_state(structure, batch_size, key, clamps=clamps, params=params)
-            final_state = run_inference(params, state, clamps, structure, infer_steps=5, eta_infer=0.1)
+            state = initialize_graph_state(
+                structure, batch_size, key, clamps=clamps, params=params
+            )
+            final_state = run_inference(
+                params, state, clamps, structure, infer_steps=5, eta_infer=0.1
+            )
 
             # Verify shapes preserved
             assert final_state.nodes["image"].z_latent.shape == (batch_size, 28, 28)
@@ -331,7 +430,13 @@ class TestNDimTraining:
         config = {
             "node_list": [
                 {"name": "image", "shape": (28, 28), "type": "linear"},
-                {"name": "hidden", "shape": (64,), "type": "linear", "flatten_input": True, "activation": {"type": "sigmoid"}},
+                {
+                    "name": "hidden",
+                    "shape": (64,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "sigmoid"},
+                },
                 {"name": "output", "shape": (10,), "type": "linear"},
             ],
             "edge_list": [
@@ -356,8 +461,14 @@ class TestNDimTraining:
 
         # Run training step
         new_params, new_opt_state, energy, final_state = train_step(
-            params, opt_state, batch, structure, optimizer, rng_key,
-            infer_steps=5, eta_infer=0.1
+            params,
+            opt_state,
+            batch,
+            structure,
+            optimizer,
+            rng_key,
+            infer_steps=5,
+            eta_infer=0.1,
         )
 
         # Verify energy is valid
@@ -374,7 +485,13 @@ class TestNDimTraining:
         config = {
             "node_list": [
                 {"name": "image", "shape": (16, 16, 3), "type": "linear"},
-                {"name": "hidden", "shape": (32,), "type": "linear", "flatten_input": True, "activation": {"type": "relu"}},
+                {
+                    "name": "hidden",
+                    "shape": (32,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "relu"},
+                },
                 {"name": "output", "shape": (5,), "type": "linear"},
             ],
             "edge_list": [
@@ -395,8 +512,14 @@ class TestNDimTraining:
         }
 
         new_params, _, energy, _ = train_step(
-            params, opt_state, batch, structure, optimizer, rng_key,
-            infer_steps=3, eta_infer=0.1
+            params,
+            opt_state,
+            batch,
+            structure,
+            optimizer,
+            rng_key,
+            infer_steps=3,
+            eta_infer=0.1,
         )
 
         assert not jnp.isnan(energy)
@@ -411,7 +534,13 @@ class TestEnergyWithNDimShapes:
         config = {
             "node_list": [
                 {"name": "image", "shape": (14, 14), "type": "linear"},
-                {"name": "hidden", "shape": (32,), "type": "linear", "flatten_input": True, "activation": {"type": "tanh"}},
+                {
+                    "name": "hidden",
+                    "shape": (32,),
+                    "type": "linear",
+                    "flatten_input": True,
+                    "activation": {"type": "tanh"},
+                },
                 {"name": "output", "shape": (5,), "type": "linear"},
             ],
             "edge_list": [
@@ -428,10 +557,14 @@ class TestEnergyWithNDimShapes:
         y = jax.random.normal(rng_key, (batch_size, 5))
         clamps = {"image": x, "output": y}
 
-        state = initialize_graph_state(structure, batch_size, rng_key, clamps=clamps, params=params)
+        state = initialize_graph_state(
+            structure, batch_size, rng_key, clamps=clamps, params=params
+        )
 
         # Run 1 step to get initial energy (energy is computed during inference, not initialization)
-        initial_state = run_inference(params, state, clamps, structure, infer_steps=1, eta_infer=0.1)
+        initial_state = run_inference(
+            params, state, clamps, structure, infer_steps=1, eta_infer=0.1
+        )
         initial_energy = sum(
             jnp.sum(initial_state.nodes[name].energy)
             for name in structure.nodes
@@ -439,7 +572,9 @@ class TestEnergyWithNDimShapes:
         )
 
         # Run more inference steps
-        final_state = run_inference(params, state, clamps, structure, infer_steps=20, eta_infer=0.1)
+        final_state = run_inference(
+            params, state, clamps, structure, infer_steps=20, eta_infer=0.1
+        )
 
         # Get final energy
         final_energy = sum(
@@ -448,5 +583,6 @@ class TestEnergyWithNDimShapes:
             if structure.nodes[name].in_degree > 0
         )
 
-        assert final_energy < initial_energy, \
-            f"Energy should decrease: initial={initial_energy}, final={final_energy}"
+        assert (
+            final_energy < initial_energy
+        ), f"Energy should decrease: initial={initial_energy}, final={final_energy}"

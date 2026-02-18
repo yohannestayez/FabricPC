@@ -16,6 +16,7 @@ import warnings
 
 class RegistrationError(Exception):
     """Base exception for registration failures."""
+
     pass
 
 
@@ -92,6 +93,7 @@ class Registry:
         Raises:
             RegistrationError: If registration fails (duplicate, missing attrs/methods)
         """
+
         def decorator(cls: Type) -> Type:
             type_lower = type_name.lower()
 
@@ -139,7 +141,9 @@ class Registry:
             # Run custom validator if present
             if attr_name in self.attr_validators:
                 attr_value = getattr(cls, attr_name)
-                self.attr_validators[attr_name](attr_value, type_name, self._error_class)
+                self.attr_validators[attr_name](
+                    attr_value, type_name, self._error_class
+                )
 
         # Check required methods
         for method_name in self.required_methods:
@@ -149,7 +153,7 @@ class Registry:
                     f"{self.name.title()} type '{type_name}': missing required method '{method_name}'"
                 )
             # Check it's not still abstract
-            if getattr(method, '__isabstractmethod__', False):
+            if getattr(method, "__isabstractmethod__", False):
                 raise self._error_class(
                     f"{self.name.title()} type '{type_name}': method '{method_name}' is abstract"
                 )
@@ -206,9 +210,11 @@ class Registry:
         try:
             if sys.version_info >= (3, 10):
                 from importlib.metadata import entry_points
+
                 eps = entry_points(group=self.entry_point_group)
             else:
                 from importlib.metadata import entry_points
+
                 all_eps = entry_points()
                 eps = all_eps.get(self.entry_point_group, [])
 
@@ -229,13 +235,12 @@ class Registry:
                 except Exception as e:
                     warnings.warn(
                         f"Failed to load {self.name} '{ep.name}' from {ep.value}: {e}",
-                        RuntimeWarning
+                        RuntimeWarning,
                     )
         except Exception as e:
             # Entry point discovery failed entirely - not critical
             warnings.warn(
-                f"{self.name.title()} entry point discovery failed: {e}",
-                RuntimeWarning
+                f"{self.name.title()} entry point discovery failed: {e}", RuntimeWarning
             )
 
     def __contains__(self, type_name: str) -> bool:
@@ -251,7 +256,10 @@ class Registry:
 # Attribute Validators
 # =============================================================================
 
-def validate_config_schema(attr_value: Any, type_name: str, error_class: Type[Exception]) -> None:
+
+def validate_config_schema(
+    attr_value: Any, type_name: str, error_class: Type[Exception]
+) -> None:
     """Validate CONFIG_SCHEMA attribute is a dict."""
     if not isinstance(attr_value, dict):
         raise error_class(
@@ -260,7 +268,9 @@ def validate_config_schema(attr_value: Any, type_name: str, error_class: Type[Ex
         )
 
 
-def validate_default_energy_config(attr_value: Any, type_name: str, error_class: Type[Exception]) -> None:
+def validate_default_energy_config(
+    attr_value: Any, type_name: str, error_class: Type[Exception]
+) -> None:
     """Validate DEFAULT_ENERGY_CONFIG attribute."""
     if not isinstance(attr_value, dict):
         raise error_class(

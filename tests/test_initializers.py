@@ -10,6 +10,7 @@ Tests:
 """
 
 import os
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_TRACEBACK_FILTERING", "off")
 
@@ -89,7 +90,9 @@ class TestBuiltinInitializers:
     def test_uniform_initializer_custom(self, rng_key):
         """Test uniform initializer with custom min and max."""
         shape = (1000, 100)
-        result = initialize(rng_key, shape, {"type": "uniform", "min": -1.0, "max": 1.0})
+        result = initialize(
+            rng_key, shape, {"type": "uniform", "min": -1.0, "max": 1.0}
+        )
 
         assert result.shape == shape
         assert jnp.all(result >= -1.0)
@@ -100,7 +103,9 @@ class TestBuiltinInitializers:
     def test_xavier_initializer_normal(self, rng_key):
         """Test Xavier initializer with normal distribution."""
         shape = (256, 128)
-        result = initialize(rng_key, shape, {"type": "xavier", "distribution": "normal"})
+        result = initialize(
+            rng_key, shape, {"type": "xavier", "distribution": "normal"}
+        )
 
         assert result.shape == shape
         # Xavier std = sqrt(2 / (fan_in + fan_out)) = sqrt(2 / 384) ≈ 0.072
@@ -110,7 +115,9 @@ class TestBuiltinInitializers:
     def test_xavier_initializer_uniform(self, rng_key):
         """Test Xavier initializer with uniform distribution."""
         shape = (256, 128)
-        result = initialize(rng_key, shape, {"type": "xavier", "distribution": "uniform"})
+        result = initialize(
+            rng_key, shape, {"type": "xavier", "distribution": "uniform"}
+        )
 
         assert result.shape == shape
         # Xavier limit = sqrt(6 / (fan_in + fan_out)) = sqrt(6 / 384) ≈ 0.125
@@ -121,12 +128,16 @@ class TestBuiltinInitializers:
     def test_kaiming_initializer_fan_in_relu(self, rng_key):
         """Test Kaiming initializer with fan_in mode and ReLU."""
         shape = (512, 256)
-        result = initialize(rng_key, shape, {
-            "type": "kaiming",
-            "mode": "fan_in",
-            "nonlinearity": "relu",
-            "distribution": "normal"
-        })
+        result = initialize(
+            rng_key,
+            shape,
+            {
+                "type": "kaiming",
+                "mode": "fan_in",
+                "nonlinearity": "relu",
+                "distribution": "normal",
+            },
+        )
 
         assert result.shape == shape
         # Kaiming std = sqrt(2) / sqrt(fan_in) = sqrt(2) / sqrt(512) ≈ 0.0625
@@ -136,12 +147,16 @@ class TestBuiltinInitializers:
     def test_kaiming_initializer_fan_out(self, rng_key):
         """Test Kaiming initializer with fan_out mode."""
         shape = (512, 256)
-        result = initialize(rng_key, shape, {
-            "type": "kaiming",
-            "mode": "fan_out",
-            "nonlinearity": "relu",
-            "distribution": "normal"
-        })
+        result = initialize(
+            rng_key,
+            shape,
+            {
+                "type": "kaiming",
+                "mode": "fan_out",
+                "nonlinearity": "relu",
+                "distribution": "normal",
+            },
+        )
 
         assert result.shape == shape
         # Kaiming std = sqrt(2) / sqrt(fan_out) = sqrt(2) / sqrt(256)
@@ -152,13 +167,17 @@ class TestBuiltinInitializers:
         """Test Kaiming initializer with leaky ReLU."""
         shape = (512, 256)
         a = 0.2  # Leaky ReLU slope
-        result = initialize(rng_key, shape, {
-            "type": "kaiming",
-            "mode": "fan_in",
-            "nonlinearity": "leaky_relu",
-            "distribution": "normal",
-            "a": a
-        })
+        result = initialize(
+            rng_key,
+            shape,
+            {
+                "type": "kaiming",
+                "mode": "fan_in",
+                "nonlinearity": "leaky_relu",
+                "distribution": "normal",
+                "a": a,
+            },
+        )
 
         assert result.shape == shape
         # Kaiming std = sqrt(2 / (1 + a^2)) / sqrt(fan_in)
@@ -202,11 +221,10 @@ class TestInitializerRegistry:
 
     def test_register_custom_initializer(self, rng_key):
         """Test registering a custom initializer."""
+
         @register_initializer("test_custom")
         class TestCustomInitializer(InitializerBase):
-            CONFIG_SCHEMA = {
-                "multiplier": {"type": (int, float), "default": 2.0}
-            }
+            CONFIG_SCHEMA = {"multiplier": {"type": (int, float), "default": 2.0}}
 
             @staticmethod
             def initialize(key, shape, config=None):
@@ -221,7 +239,9 @@ class TestInitializerRegistry:
             result = initialize(rng_key, (4, 4), {"type": "test_custom"})
             assert jnp.all(result == 2.0)
 
-            result_custom = initialize(rng_key, (4, 4), {"type": "test_custom", "multiplier": 5.0})
+            result_custom = initialize(
+                rng_key, (4, 4), {"type": "test_custom", "multiplier": 5.0}
+            )
             assert jnp.all(result_custom == 5.0)
         finally:
             # Cleanup
@@ -229,6 +249,7 @@ class TestInitializerRegistry:
 
     def test_duplicate_registration_raises(self):
         """Test that duplicate registration with different class raises error."""
+
         @register_initializer("test_dup")
         class FirstInit(InitializerBase):
             CONFIG_SCHEMA = {}
@@ -238,7 +259,10 @@ class TestInitializerRegistry:
                 return jnp.zeros(shape)
 
         try:
-            with pytest.raises(InitializerRegistrationError, match="already registered"):
+            with pytest.raises(
+                InitializerRegistrationError, match="already registered"
+            ):
+
                 @register_initializer("test_dup")
                 class SecondInit(InitializerBase):
                     CONFIG_SCHEMA = {}
@@ -246,11 +270,13 @@ class TestInitializerRegistry:
                     @staticmethod
                     def initialize(key, shape, config=None):
                         return jnp.ones(shape)
+
         finally:
             unregister_initializer("test_dup")
 
     def test_idempotent_registration_same_class(self):
         """Test that registering the same class object twice is idempotent."""
+
         class IdempotentInit(InitializerBase):
             CONFIG_SCHEMA = {}
 
@@ -357,6 +383,7 @@ class TestInterfaceValidation:
     def test_missing_config_schema_raises(self):
         """Test that missing CONFIG_SCHEMA raises error."""
         with pytest.raises(InitializerRegistrationError, match="CONFIG_SCHEMA"):
+
             @register_initializer("test_no_schema")
             class NoSchemaInit(InitializerBase):
                 @staticmethod
@@ -366,6 +393,7 @@ class TestInterfaceValidation:
     def test_missing_initialize_raises(self):
         """Test that missing initialize method raises error."""
         with pytest.raises(InitializerRegistrationError, match="initialize"):
+
             @register_initializer("test_no_init")
             class NoInitMethod(InitializerBase):
                 CONFIG_SCHEMA = {}

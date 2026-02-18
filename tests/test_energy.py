@@ -6,6 +6,7 @@ and integration with node energy computation.
 """
 
 import os
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
 import pytest
@@ -73,6 +74,7 @@ class TestCustomEnergyRegistration:
 
     def test_register_custom_energy(self):
         """Test registering a custom energy functional."""
+
         @register_energy("test_custom_energy")
         class TestCustomEnergy(EnergyFunctional):
             CONFIG_SCHEMA = {}
@@ -95,6 +97,7 @@ class TestCustomEnergyRegistration:
 
     def test_duplicate_registration_different_class_raises(self):
         """Test that registering same type with different class raises."""
+
         @register_energy("test_dup_energy")
         class TestEnergy1(EnergyFunctional):
             CONFIG_SCHEMA = {}
@@ -109,6 +112,7 @@ class TestCustomEnergyRegistration:
 
         try:
             with pytest.raises(EnergyRegistrationError) as exc_info:
+
                 @register_energy("test_dup_energy")
                 class TestEnergy2(EnergyFunctional):
                     CONFIG_SCHEMA = {}
@@ -128,6 +132,7 @@ class TestCustomEnergyRegistration:
     def test_missing_config_schema_raises(self):
         """Test that missing CONFIG_SCHEMA raises error."""
         with pytest.raises(EnergyRegistrationError) as exc_info:
+
             @register_energy("test_no_schema")
             class NoSchemaEnergy(EnergyFunctional):
                 @staticmethod
@@ -143,6 +148,7 @@ class TestCustomEnergyRegistration:
     def test_missing_method_raises(self):
         """Test that missing required method raises error."""
         with pytest.raises(EnergyRegistrationError) as exc_info:
+
             @register_energy("test_missing_method")
             class MissingMethodEnergy(EnergyFunctional):
                 CONFIG_SCHEMA = {}
@@ -150,6 +156,7 @@ class TestCustomEnergyRegistration:
                 @staticmethod
                 def energy(z_latent, z_mu, config=None):
                     return jnp.zeros((z_latent.shape[0],))
+
                 # Missing grad_latent
 
         assert "grad_latent" in str(exc_info.value)
@@ -314,14 +321,18 @@ class TestKLDivergenceEnergy:
 
     def test_kl_divergence_batch_computation(self):
         """Test KL divergence computes correct numerical values."""
-        z_latent = jnp.array([
-            [0.7, 0.2, 0.1],
-            [0.3, 0.3, 0.4],
-        ])
-        z_mu = jnp.array([
-            [0.6, 0.3, 0.1],
-            [0.5, 0.25, 0.25],
-        ])
+        z_latent = jnp.array(
+            [
+                [0.7, 0.2, 0.1],
+                [0.3, 0.3, 0.4],
+            ]
+        )
+        z_mu = jnp.array(
+            [
+                [0.6, 0.3, 0.1],
+                [0.5, 0.25, 0.25],
+            ]
+        )
 
         energy = KLDivergenceEnergy.energy(z_latent, z_mu)
 
@@ -329,14 +340,14 @@ class TestKLDivergenceEnergy:
 
         # Manually compute expected values
         expected_0 = (
-            0.7 * jnp.log(0.7 / 0.6) +
-            0.2 * jnp.log(0.2 / 0.3) +
-            0.1 * jnp.log(0.1 / 0.1)
+            0.7 * jnp.log(0.7 / 0.6)
+            + 0.2 * jnp.log(0.2 / 0.3)
+            + 0.1 * jnp.log(0.1 / 0.1)
         )
         expected_1 = (
-            0.3 * jnp.log(0.3 / 0.5) +
-            0.3 * jnp.log(0.3 / 0.25) +
-            0.4 * jnp.log(0.4 / 0.25)
+            0.3 * jnp.log(0.3 / 0.5)
+            + 0.3 * jnp.log(0.3 / 0.25)
+            + 0.4 * jnp.log(0.4 / 0.25)
         )
 
         assert jnp.allclose(energy[0], expected_0, atol=1e-5)
@@ -373,6 +384,7 @@ class TestKLDivergenceEnergy:
         assert jnp.isfinite(energy[0])  # Should not be inf or nan
         assert jnp.allclose(energy[0], expected, atol=1e-5)
 
+
 class TestConfigValidation:
     """Test energy config validation."""
 
@@ -385,6 +397,7 @@ class TestConfigValidation:
     def test_type_mismatch_raises(self):
         """Test that wrong type raises ConfigValidationError."""
         from fabricpc.core.config import ConfigValidationError
+
         config = {"precision": "high"}  # Should be float
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_energy_config(GaussianEnergy, config)
@@ -495,7 +508,9 @@ class TestIntegration:
         key = jax.random.PRNGKey(0)
         params, structure = create_pc_graph(config, key)
 
-        assert structure.nodes["output"].node_config["energy"]["type"] == "cross_entropy"
+        assert (
+            structure.nodes["output"].node_config["energy"]["type"] == "cross_entropy"
+        )
 
     def test_unknown_energy_type_raises(self):
         """Test that unknown energy type raises error during graph creation."""

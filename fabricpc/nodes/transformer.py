@@ -18,7 +18,10 @@ from typing import Dict, Tuple, Any
 # Rotary Position Embeddings (RoPE)
 # =============================================================================
 
-def precompute_freqs_cis(head_dim: int, max_seq_len: int, theta: float = 10000.0) -> Tuple[jnp.ndarray, jnp.ndarray]:
+
+def precompute_freqs_cis(
+    head_dim: int, max_seq_len: int, theta: float = 10000.0
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """
     Precompute the frequency tensor for RoPE (Rotary Position Embeddings).
 
@@ -84,7 +87,7 @@ def apply_rotary_emb(
 
     # Split x into even and odd dimensions
     x_even = x[..., 0::2]  # (batch, heads, seq, head_dim // 2)
-    x_odd = x[..., 1::2]   # (batch, heads, seq, head_dim // 2)
+    x_odd = x[..., 1::2]  # (batch, heads, seq, head_dim // 2)
 
     # Apply rotation:
     x_even_rot = x_even * cos - x_odd * sin
@@ -96,6 +99,7 @@ def apply_rotary_emb(
     x_rot = x_rot.reshape(x.shape)
 
     return x_rot
+
 
 @register_node("transformer_block")
 class TransformerBlockNode(NodeBase):
@@ -131,61 +135,63 @@ class TransformerBlockNode(NodeBase):
         "num_heads": {
             "type": int,
             "default": 8,
-            "description": "Number of attention heads"
+            "description": "Number of attention heads",
         },
         "ff_dim": {
             "type": int,
             "default": None,  # Will be computed as 4 * embed_dim if not specified
-            "description": "Feedforward hidden dimension (defaults to 4 * embed_dim)"
+            "description": "Feedforward hidden dimension (defaults to 4 * embed_dim)",
         },
         "internal_activation": {
             "type": dict,
             "default": {"type": "gelu"},
-            "description": "Internal activation function for the feedforward network"
+            "description": "Internal activation function for the feedforward network",
         },
         "dropout_rate": {
             "type": float,
             "default": 0.0,
-            "description": "Dropout rate (currently unused, for future implementation)"
+            "description": "Dropout rate (currently unused, for future implementation)",
         },
         "pre_norm": {
             "type": bool,
             "default": True,
-            "description": "Use pre-norm architecture (LayerNorm before attention/FFN)"
+            "description": "Use pre-norm architecture (LayerNorm before attention/FFN)",
         },
         "use_rope": {
             "type": bool,
             "default": True,
-            "description": "Use Rotary Position Embeddings (RoPE)"
+            "description": "Use Rotary Position Embeddings (RoPE)",
         },
         "rope_theta": {
             "type": float,
             "default": 10000.0,
-            "description": "Base frequency for RoPE"
+            "description": "Base frequency for RoPE",
         },
         "weight_init": {
             "type": dict,
             "default": {"type": "kaiming", "mode": "fan_out"},
-            "description": "Weight initialization config"
+            "description": "Weight initialization config",
         },
     }
 
     DEFAULT_ENERGY_CONFIG = {"type": "gaussian"}
-    DEFAULT_ACTIVATION_CONFIG = {"type": "identity"}  # Identity at output of node; internal activations handled in "internal_activation"
+    DEFAULT_ACTIVATION_CONFIG = {
+        "type": "identity"
+    }  # Identity at output of node; internal activations handled in "internal_activation"
 
     @staticmethod
     def get_slots():
         return {
-            "in": SlotSpec(name="in", is_multi_input=False)  ,  # Input to the block
+            "in": SlotSpec(name="in", is_multi_input=False),  # Input to the block
             "mask": SlotSpec(name="mask", is_multi_input=False),  # Optional mask
         }
 
     @staticmethod
     def initialize_params(
-            key: jax.Array,  # from jax.random.PRNGKey
-            node_shape: Tuple[int, ...],
-            input_shapes: Dict[str, Tuple[int, ...]],  # edge_key -> source shape
-            config: Dict[str, Any]
+        key: jax.Array,  # from jax.random.PRNGKey
+        node_shape: Tuple[int, ...],
+        input_shapes: Dict[str, Tuple[int, ...]],  # edge_key -> source shape
+        config: Dict[str, Any],
     ) -> NodeParams:
 
         num_heads = config["num_heads"]
@@ -206,8 +212,12 @@ class TransformerBlockNode(NodeBase):
                 "W_v": jax.random.normal(keys[2], (embed_dim, embed_dim)) * std,
                 "W_o": jax.random.normal(keys[3], (embed_dim, embed_dim)) * std,
                 # FFN weights
-                "W_ff1": jax.random.normal(keys[4], (embed_dim, ff_dim)) * std * jnp.sqrt(ff_dim / embed_dim),
-                "W_ff2": jax.random.normal(keys[5], (ff_dim, embed_dim)) * std * jnp.sqrt(ff_dim / embed_dim),
+                "W_ff1": jax.random.normal(keys[4], (embed_dim, ff_dim))
+                * std
+                * jnp.sqrt(ff_dim / embed_dim),
+                "W_ff2": jax.random.normal(keys[5], (ff_dim, embed_dim))
+                * std
+                * jnp.sqrt(ff_dim / embed_dim),
                 # LayerNorm parameters
                 "ln1_gamma": jnp.ones((1, 1, embed_dim)),
                 "ln2_gamma": jnp.ones((1, 1, embed_dim)),
@@ -221,15 +231,15 @@ class TransformerBlockNode(NodeBase):
                 "b_ff2": jnp.zeros((1, 1, embed_dim)),
                 "ln1_beta": jnp.zeros((1, 1, embed_dim)),
                 "ln2_beta": jnp.zeros((1, 1, embed_dim)),
-            }
+            },
         )
 
     @staticmethod
     def forward(
-            params: NodeParams,
-            inputs: Dict[str, jnp.ndarray],  # EdgeInfo.key -> inputs data
-            state: NodeState,  # state object for the present node
-            node_info: NodeInfo,
+        params: NodeParams,
+        inputs: Dict[str, jnp.ndarray],  # EdgeInfo.key -> inputs data
+        state: NodeState,  # state object for the present node
+        node_info: NodeInfo,
     ) -> tuple[jax.Array, NodeState]:
         """
         Forward pass for the Transformer Block.
@@ -253,9 +263,7 @@ class TransformerBlockNode(NodeBase):
 
         # LayerNorm 1
         x_norm1 = TransformerBlockNode._layernorm(
-            input_tensor,
-            params.weights["ln1_gamma"],
-            params.biases["ln1_beta"]
+            input_tensor, params.weights["ln1_gamma"], params.biases["ln1_beta"]
         )
 
         # Multi-Head Attention
@@ -281,15 +289,17 @@ class TransformerBlockNode(NodeBase):
 
         # LayerNorm 2
         x_norm2 = TransformerBlockNode._layernorm(
-            x_res1,
-            params.weights["ln2_gamma"],
-            params.biases["ln2_beta"]
+            x_res1, params.weights["ln2_gamma"], params.biases["ln2_beta"]
         )
 
         # Feedforward Network
-        ff_intermediate = jnp.matmul(x_norm2, params.weights["W_ff1"]) + params.biases["b_ff1"]
+        ff_intermediate = (
+            jnp.matmul(x_norm2, params.weights["W_ff1"]) + params.biases["b_ff1"]
+        )
         ff_activated = activation_fn(ff_intermediate)
-        ff_output = jnp.matmul(ff_activated, params.weights["W_ff2"]) + params.biases["b_ff2"]
+        ff_output = (
+            jnp.matmul(ff_activated, params.weights["W_ff2"]) + params.biases["b_ff2"]
+        )
 
         # Residual connection 2
         z_mu = x_res1 + ff_output
@@ -311,10 +321,7 @@ class TransformerBlockNode(NodeBase):
 
     @staticmethod
     def _layernorm(
-            x: jnp.ndarray,
-            gamma: jnp.ndarray,
-            beta: jnp.ndarray,
-            eps: float = 1e-5
+        x: jnp.ndarray, gamma: jnp.ndarray, beta: jnp.ndarray, eps: float = 1e-5
     ) -> jnp.ndarray:
         """
         Layer Normalization implementation.
@@ -327,20 +334,21 @@ class TransformerBlockNode(NodeBase):
         return gamma * x_normalized + beta
 
     @staticmethod
-    def _mha(x: jnp.ndarray,
-             mask: jnp.ndarray,
-             num_heads: int,         # Number of attention heads
-             W_q: jnp.ndarray,  # Query projection
-             W_k: jnp.ndarray,  # Key projection
-             W_v: jnp.ndarray,  # Value projection
-             W_o: jnp.ndarray,  # Output projection
-             b_q: jnp.ndarray,  # Query bias
-             b_k: jnp.ndarray,  # Key bias
-             b_v: jnp.ndarray,  # Value bias
-             b_o: jnp.ndarray,  # Output bias
-             activation_fn,     # Activation function
-             use_rope: bool = True,  # Use Rotary Position Embeddings
-             rope_theta: float = 10000.0,  # Base frequency for RoPE
+    def _mha(
+        x: jnp.ndarray,
+        mask: jnp.ndarray,
+        num_heads: int,  # Number of attention heads
+        W_q: jnp.ndarray,  # Query projection
+        W_k: jnp.ndarray,  # Key projection
+        W_v: jnp.ndarray,  # Value projection
+        W_o: jnp.ndarray,  # Output projection
+        b_q: jnp.ndarray,  # Query bias
+        b_k: jnp.ndarray,  # Key bias
+        b_v: jnp.ndarray,  # Value bias
+        b_o: jnp.ndarray,  # Output bias
+        activation_fn,  # Activation function
+        use_rope: bool = True,  # Use Rotary Position Embeddings
+        rope_theta: float = 10000.0,  # Base frequency for RoPE
     ) -> tuple[jnp.ndarray, Dict[str, jnp.ndarray]]:
         """
         Multi-head attention implementation.
@@ -378,7 +386,9 @@ class TransformerBlockNode(NodeBase):
 
         # Scaled dot-product attention
         scale = jnp.sqrt(head_dim)
-        scores = jnp.matmul(Q, K.transpose(0, 1, 3, 2)) / scale  # (batch, heads, seq, seq)
+        scores = (
+            jnp.matmul(Q, K.transpose(0, 1, 3, 2)) / scale
+        )  # (batch, heads, seq, seq)
 
         # Optional mask
         if mask is not None:
@@ -388,7 +398,9 @@ class TransformerBlockNode(NodeBase):
         attn_output = jnp.matmul(attn_matrix, V)  # (batch, heads, seq, head_dim)
 
         # Reshape back: (batch, seq, embed_dim)
-        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, embed_dim)
+        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(
+            batch_size, seq_len, embed_dim
+        )
 
         # Output projection
         pre_activation = jnp.matmul(attn_output, W_o) + b_o
@@ -405,4 +417,3 @@ class TransformerBlockNode(NodeBase):
         }
 
         return projection, substructure
-

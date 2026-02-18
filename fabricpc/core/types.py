@@ -13,10 +13,12 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class SlotInfo:
     """Metadata for an input slot to a node."""
+
     name: str  # Slot name (e.g., "in")
     parent_node: str  # Name of the parent node
     is_multi_input: bool  # True if slot accepts multiple edges, False for single edge
     in_neighbors: Tuple[str, ...]  # Tuple of node names connecting to this slot
+
 
 @dataclass(frozen=True)
 class NodeInfo:
@@ -41,6 +43,7 @@ class NodeInfo:
     out_degree: int  # Number of outgoing edges
     in_edges: Tuple[str, ...]  # Tuple of edge keys
     out_edges: Tuple[str, ...]  # Tuple of edge keys
+
 
 @dataclass(frozen=True)
 class EdgeInfo:
@@ -88,24 +91,25 @@ EdgeInfo.CONFIG_SCHEMA = {
     "source_name": {
         "type": str,
         "required": True,
-        "description": "Name of the source node"
+        "description": "Name of the source node",
     },
     "target_name": {
         "type": str,
         "required": True,
-        "description": "Name of the target node"
+        "description": "Name of the target node",
     },
-    "slot": {
-        "type": str,
-        "default": "in",
-        "description": "Target slot name"
-    }
+    "slot": {"type": str, "default": "in", "description": "Target slot name"},
 }
+
 
 class NodeParams(NamedTuple):
     """Parameters for a single node (weights, biases, etc.)."""
-    weights: Dict[str, jnp.ndarray]  # Named weight matrices, where name identifies the substructure of the node for the parameters
-    biases: Dict[str, jnp.ndarray]   # Named bias vectors
+
+    weights: Dict[
+        str, jnp.ndarray
+    ]  # Named weight matrices, where name identifies the substructure of the node for the parameters
+    biases: Dict[str, jnp.ndarray]  # Named bias vectors
+
 
 class GraphParams(NamedTuple):
     """
@@ -132,6 +136,7 @@ class GraphParams(NamedTuple):
                 total_params += sum(b.size for b in node_params.biases.values())
         return f"GraphParams(nodes={n_nodes}, total_params={total_params})"
 
+
 class NodeState(NamedTuple):
     """
     Dynamic state of the Node during inference.
@@ -154,6 +159,7 @@ class NodeState(NamedTuple):
     latent_grad: jnp.ndarray  # For local gradient accumulation
     substructure: Dict[str, jnp.ndarray]  # substructure of node internal states
 
+
 class GraphState(NamedTuple):
     """
     Dynamic state of the network during inference.
@@ -164,12 +170,14 @@ class GraphState(NamedTuple):
         nodes: Dictionary mapping node names to NodeState
         batch_size: Current batch size
     """
+
     nodes: Dict[str, NodeState]  # {node_name: NodeState}
     batch_size: int
 
     def __repr__(self) -> str:
         n_nodes = len(self.nodes)
         return f"GraphState(nodes={n_nodes}, batch_size={self.batch_size})"
+
 
 class GraphStructure(NamedTuple):
     """
@@ -218,9 +226,7 @@ class GraphStructure(NamedTuple):
         from fabricpc.nodes import get_node_class, validate_node_config, NodeBase
 
         # 1. Validate graph-level config
-        validated_graph = validate_config(
-            cls.CONFIG_SCHEMA, config, context="graph"
-        )
+        validated_graph = validate_config(cls.CONFIG_SCHEMA, config, context="graph")
 
         node_list = validated_graph["node_list"]
         edge_list = validated_graph["edge_list"]
@@ -252,24 +258,35 @@ class GraphStructure(NamedTuple):
 
             # Delegate node construction to node class
             node_class = get_node_class(node_type)
-            nodes[name] = node_class.from_config(node_config, in_edges_dict, out_edges_dict)
+            nodes[name] = node_class.from_config(
+                node_config, in_edges_dict, out_edges_dict
+            )
 
         # 4. Validate edge endpoints exist
         for edge_key, edge_info in edges.items():
             if edge_info.source not in nodes:
-                raise ValueError(f"edge source node '{edge_info.source}' does not exist")
+                raise ValueError(
+                    f"edge source node '{edge_info.source}' does not exist"
+                )
             if edge_info.target not in nodes:
-                raise ValueError(f"edge target node '{edge_info.target}' does not exist")
+                raise ValueError(
+                    f"edge target node '{edge_info.target}' does not exist"
+                )
 
         # 5. Compute topological order
         node_order = cls._topological_sort(nodes, edges)
 
-        return cls(nodes=nodes, edges=edges, task_map=task_map, node_order=node_order, config=validated_graph)
+        return cls(
+            nodes=nodes,
+            edges=edges,
+            task_map=task_map,
+            node_order=node_order,
+            config=validated_graph,
+        )
 
     @staticmethod
     def _topological_sort(
-        nodes: Dict[str, "NodeInfo"],
-        edges: Dict[str, "EdgeInfo"]
+        nodes: Dict[str, "NodeInfo"], edges: Dict[str, "EdgeInfo"]
     ) -> Tuple[str, ...]:
         """
         Compute topological ordering of nodes for feedforward traversal.
@@ -311,29 +328,30 @@ class GraphStructure(NamedTuple):
 
         return tuple(result)
 
+
 # Config schema for graph configuration (validated during graph construction)
 # Node and edge configs are validated by their respective class CONFIG_SCHEMAs
 GraphStructure.CONFIG_SCHEMA = {
     "node_list": {
         "type": list,
         "required": True,
-        "description": "List of node configurations"
+        "description": "List of node configurations",
     },
     "edge_list": {
         "type": list,
         "required": True,
-        "description": "List of edge configurations"
+        "description": "List of edge configurations",
     },
     "task_map": {
         "type": dict,
         "required": True,
-        "description": "Mapping of task names to node names"
+        "description": "Mapping of task names to node names",
     },
     "graph_state_initializer": {
         "type": dict,
         "default": {"type": "feedforward"},
-        "description": "Graph-level latent state initialization configuration"
-    }
+        "description": "Graph-level latent state initialization configuration",
+    },
 }
 
 
@@ -353,7 +371,15 @@ tree_util.register_pytree_node(
 tree_util.register_pytree_node(
     NodeState,
     lambda ns: (
-        (ns.z_latent, ns.z_mu, ns.error, ns.energy, ns.pre_activation, ns.latent_grad, ns.substructure),
+        (
+            ns.z_latent,
+            ns.z_mu,
+            ns.error,
+            ns.energy,
+            ns.pre_activation,
+            ns.latent_grad,
+            ns.substructure,
+        ),
         None,
     ),
     lambda aux, children: NodeState(*children),
@@ -362,8 +388,8 @@ tree_util.register_pytree_node(
 tree_util.register_pytree_node(
     GraphState,
     lambda gs: (
-        (gs.nodes,),        # Dynamic children (differentiable)
-        (gs.batch_size,),   # Static auxiliary data (metadata)
+        (gs.nodes,),  # Dynamic children (differentiable)
+        (gs.batch_size,),  # Static auxiliary data (metadata)
     ),
     lambda aux, children: GraphState(children[0], aux[0]),
 )

@@ -53,6 +53,7 @@ from fabricpc.core.registry import Registry, RegistrationError, validate_config_
 # Initializer Base Class
 # =============================================================================
 
+
 class InitializerBase(ABC):
     """
     Abstract base class for tensor initializers.
@@ -88,9 +89,7 @@ class InitializerBase(ABC):
     @staticmethod
     @abstractmethod
     def initialize(
-        key: jax.Array,
-        shape: Tuple[int, ...],
-        config: Dict[str, Any] = None
+        key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Initialize array with specified shape.
@@ -110,8 +109,10 @@ class InitializerBase(ABC):
 # Initializer Registry
 # =============================================================================
 
+
 class InitializerRegistrationError(RegistrationError):
     """Raised when initializer registration fails."""
+
     pass
 
 
@@ -123,7 +124,7 @@ _initializer_registry = Registry(
     required_methods=["initialize"],
     attr_validators={
         "CONFIG_SCHEMA": validate_config_schema,
-    }
+    },
 )
 _initializer_registry.set_error_class(InitializerRegistrationError)
 
@@ -187,8 +188,7 @@ def clear_initializer_registry() -> None:
 
 
 def validate_initializer_config(
-    initializer_class: Type[InitializerBase],
-    config: Dict[str, Any]
+    initializer_class: Type[InitializerBase], config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Validate and apply defaults from initializer's CONFIG_SCHEMA.
@@ -205,7 +205,7 @@ def validate_initializer_config(
     """
     from fabricpc.core.config import validate_config
 
-    schema = getattr(initializer_class, 'CONFIG_SCHEMA', None)
+    schema = getattr(initializer_class, "CONFIG_SCHEMA", None)
     init_type = config.get("type", "unknown") if config else "unknown"
     return validate_config(schema, config, context=f"initializer '{init_type}'")
 
@@ -228,6 +228,7 @@ def discover_external_initializers() -> None:
 # Built-in Initializers
 # =============================================================================
 
+
 @register_initializer("zeros")
 class ZerosInitializer(InitializerBase):
     """
@@ -240,9 +241,7 @@ class ZerosInitializer(InitializerBase):
 
     @staticmethod
     def initialize(
-        key: jax.Array,
-        shape: Tuple[int, ...],
-        config: Dict[str, Any] = None
+        key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """Return array of zeros."""
         return jnp.zeros(shape)
@@ -260,9 +259,7 @@ class OnesInitializer(InitializerBase):
 
     @staticmethod
     def initialize(
-        key: jax.Array,
-        shape: Tuple[int, ...],
-        config: Dict[str, Any] = None
+        key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """Return array of ones."""
         return jnp.ones(shape)
@@ -284,20 +281,18 @@ class NormalInitializer(InitializerBase):
         "mean": {
             "type": (int, float),
             "default": 0.0,
-            "description": "Mean of the normal distribution"
+            "description": "Mean of the normal distribution",
         },
         "std": {
             "type": (int, float),
             "default": 0.05,
-            "description": "Standard deviation of the normal distribution"
+            "description": "Standard deviation of the normal distribution",
         },
     }
 
     @staticmethod
     def initialize(
-        key: jax.Array,
-        shape: Tuple[int, ...],
-        config: Dict[str, Any] = None
+        key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """Initialize from normal distribution: mean + std * N(0, 1)."""
         mean = config.get("mean", 0.0) if config else 0.0
@@ -321,20 +316,18 @@ class UniformInitializer(InitializerBase):
         "min": {
             "type": (int, float),
             "default": -0.1,
-            "description": "Minimum value of the uniform distribution"
+            "description": "Minimum value of the uniform distribution",
         },
         "max": {
             "type": (int, float),
             "default": 0.1,
-            "description": "Maximum value of the uniform distribution"
+            "description": "Maximum value of the uniform distribution",
         },
     }
 
     @staticmethod
     def initialize(
-        key: jax.Array,
-        shape: Tuple[int, ...],
-        config: Dict[str, Any] = None
+        key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """Initialize from uniform distribution: U(min, max)."""
         min_val = config.get("min", -0.1) if config else -0.1
@@ -364,15 +357,13 @@ class XavierInitializer(InitializerBase):
             "type": str,
             "default": "normal",
             "choices": ["normal", "uniform"],
-            "description": "Distribution type for Xavier initialization"
+            "description": "Distribution type for Xavier initialization",
         },
     }
 
     @staticmethod
     def initialize(
-        key: jax.Array,
-        shape: Tuple[int, ...],
-        config: Dict[str, Any] = None
+        key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """Initialize using Xavier/Glorot scheme."""
         distribution = config.get("distribution", "normal") if config else "normal"
@@ -414,32 +405,30 @@ class KaimingInitializer(InitializerBase):
             "type": str,
             "default": "fan_in",
             "choices": ["fan_in", "fan_out"],
-            "description": "Which dimension to use for variance scaling"
+            "description": "Which dimension to use for variance scaling",
         },
         "nonlinearity": {
             "type": str,
             "default": "relu",
             "choices": ["relu", "leaky_relu"],
-            "description": "Nonlinearity type for gain calculation"
+            "description": "Nonlinearity type for gain calculation",
         },
         "distribution": {
             "type": str,
             "default": "normal",
             "choices": ["normal", "uniform"],
-            "description": "Distribution type for Kaiming initialization"
+            "description": "Distribution type for Kaiming initialization",
         },
         "a": {
             "type": (int, float),
             "default": 0.01,
-            "description": "Negative slope for leaky_relu"
+            "description": "Negative slope for leaky_relu",
         },
     }
 
     @staticmethod
     def initialize(
-        key: jax.Array,
-        shape: Tuple[int, ...],
-        config: Dict[str, Any] = None
+        key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """Initialize using Kaiming/He scheme."""
         config = config or {}
@@ -470,10 +459,9 @@ class KaimingInitializer(InitializerBase):
 # Convenience Functions
 # =============================================================================
 
+
 def initialize(
-    key: jax.Array,
-    shape: Tuple[int, ...],
-    config: Dict[str, Any] = None
+    key: jax.Array, shape: Tuple[int, ...], config: Dict[str, Any] = None
 ) -> jnp.ndarray:
     """
     Initialize array using the specified initializer.

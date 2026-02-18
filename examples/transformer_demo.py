@@ -5,6 +5,8 @@ Transformer Predictive Coding Demo
 A quick experiment demonstrating transformer blocks with predictive coding versus backprop training
 on character-level language modeling using the TinyShakespeare dataset.
 
+Works in Backprop mode out of the box, but predictive coding training is not yet tuned - treat this as a starting point for experimentation!
+
 This demo:
 1. Downloads TinyShakespeare (~1MB of text)
 2. Trains a small transformer for next-character prediction
@@ -12,11 +14,12 @@ This demo:
 4. Backprop training option, set use_pcn = False
 
 Expected runtime: ~5-20 minutes on a consumer GPU (RTX 3080/4080 class)
-
-Training with PC exhibits mode collapse; needs tuning, better weight init, and AIM tensor board - treat this as a starting point!
 """
 
+use_pcn = False  # Set to True to use predictive coding training, False for backprop
+
 import os
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_PLATFORMS", "cuda")
 
@@ -28,17 +31,25 @@ import urllib.request
 from typing import Tuple, Iterator, Dict, List
 
 from fabricpc.graph import create_pc_graph
-from fabricpc.training.train_autoregressive import train_autoregressive, generate_autoregressive, evaluate_autoregressive
-from fabricpc.training.train_backprop import train_backprop_autoregressive, evaluate_backprop_autoregressive
+from fabricpc.training.train_autoregressive import (
+    train_autoregressive,
+    generate_autoregressive,
+    evaluate_autoregressive,
+)
+from fabricpc.training.train_backprop import (
+    train_backprop_autoregressive,
+    evaluate_backprop_autoregressive,
+)
 
 # Reproducibility
-jax.config.update('jax_default_prng_impl', 'threefry2x32')
+jax.config.update("jax_default_prng_impl", "threefry2x32")
 np.random.seed(42)
 
 
 # ==============================================================================
 # DATA LOADING: TinyShakespeare
 # ==============================================================================
+
 
 def download_tiny_shakespeare(data_dir: str = "./data") -> str:
     """Download TinyShakespeare dataset if not present."""
@@ -51,7 +62,7 @@ def download_tiny_shakespeare(data_dir: str = "./data") -> str:
         urllib.request.urlretrieve(url, filepath)
         print(f"Saved to {filepath}")
 
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         text = f.read()
 
     return text
@@ -97,19 +108,17 @@ class CharDataset:
 
     def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray]:
         """Get input sequence and target (next character for each position)."""
-        x = self.data[idx:idx + self.seq_len]
-        y = self.data[idx + 1:idx + self.seq_len + 1]  # Shifted by 1
+        x = self.data[idx : idx + self.seq_len]
+        y = self.data[idx + 1 : idx + self.seq_len + 1]  # Shifted by 1
         return x, y
 
     def decode(self, indices: np.ndarray) -> str:
         """Convert indices back to text."""
-        return ''.join([self.idx_to_char[int(i)] for i in indices])
+        return "".join([self.idx_to_char[int(i)] for i in indices])
 
 
 def create_dataloader(
-    dataset: CharDataset,
-    batch_size: int,
-    shuffle: bool = True
+    dataset: CharDataset, batch_size: int, shuffle: bool = True
 ) -> Iterator[Dict[str, np.ndarray]]:
     """Simple dataloader for character sequences."""
     indices = np.arange(len(dataset))
@@ -117,7 +126,7 @@ def create_dataloader(
         np.random.shuffle(indices)
 
     for start_idx in range(0, len(indices), batch_size):
-        batch_indices = indices[start_idx:start_idx + batch_size]
+        batch_indices = indices[start_idx : start_idx + batch_size]
         if len(batch_indices) < batch_size:
             continue  # Skip incomplete batches
 
@@ -159,6 +168,7 @@ class DataLoaderWrapper:
 # MODEL CONFIGURATION
 # ==============================================================================
 
+
 def create_transformer_config(
     vocab_size: int,
     seq_len: int,
@@ -166,7 +176,7 @@ def create_transformer_config(
     num_heads: int,
     num_blocks: int,
     ff_dim: int,  # should be 4x embed_dim
-    rope_theta: float, # longer than sequence length
+    rope_theta: float,  # longer than sequence length
 ) -> dict:
     """
     Create a transformer language model configuration.
@@ -196,7 +206,7 @@ def create_transformer_config(
             "shape": (1, seq_len, seq_len),
             "type": "linear",
             "activation": {"type": "identity"},
-        }
+        },
     ]
 
     edge_list = [
@@ -207,29 +217,37 @@ def create_transformer_config(
     prev_name = "embed"
     for i in range(num_blocks):
         block_name = f"transformer_{i}"
-        node_list.append({
-            "name": block_name,
-            "shape": (seq_len, embed_dim),
-            "type": "transformer_block",
-            "num_heads": num_heads,
-            "ff_dim": ff_dim,
-            "internal_activation": {"type": "gelu"},
-            "rope_theta": rope_theta,
-        })
-        edge_list.append({"source_name": prev_name, "target_name": block_name, "slot": "in"})  # wire one block to the next
-        edge_list.append({"source_name": "mask", "target_name": block_name, "slot": "mask"})  # wire mask to the block
+        node_list.append(
+            {
+                "name": block_name,
+                "shape": (seq_len, embed_dim),
+                "type": "transformer_block",
+                "num_heads": num_heads,
+                "ff_dim": ff_dim,
+                "internal_activation": {"type": "gelu"},
+                "rope_theta": rope_theta,
+            }
+        )
+        edge_list.append(
+            {"source_name": prev_name, "target_name": block_name, "slot": "in"}
+        )  # wire one block to the next
+        edge_list.append(
+            {"source_name": "mask", "target_name": block_name, "slot": "mask"}
+        )  # wire mask to the block
         prev_name = block_name
 
     # Output projection back to vocabulary
     # Use small initialization to prevent softmax saturation from large logits
-    node_list.append({
-        "name": "output",
-        "shape": (seq_len, vocab_size),
-        "type": "linear",
-        "activation": {"type": "softmax"},
-        "energy": {"type": "cross_entropy"},
-        "weight_init": {"type": "normal", "mean": 0.0, "std": 0.02},
-    })
+    node_list.append(
+        {
+            "name": "output",
+            "shape": (seq_len, vocab_size),
+            "type": "linear",
+            "activation": {"type": "softmax"},
+            "energy": {"type": "cross_entropy"},
+            "weight_init": {"type": "normal", "mean": 0.0, "std": 0.02},
+        }
+    )
     edge_list.append({"source_name": prev_name, "target_name": "output", "slot": "in"})
 
     # Assemble the complete model configuration
@@ -245,6 +263,7 @@ def create_transformer_config(
 # ==============================================================================
 # TEXT GENERATION
 # ==============================================================================
+
 
 def generate_text(
     params,
@@ -285,7 +304,7 @@ def generate_text(
         rng_key = jax.random.PRNGKey(0)
 
     seq_len = structure.nodes["input"].shape[0]
-    pad_char = dataset.char_to_idx.get(' ', 0)
+    pad_char = dataset.char_to_idx.get(" ", 0)
 
     # Encode all prompts and pad to seq_len
     batch_indices = []
@@ -294,7 +313,9 @@ def generate_text(
         if len(prompt_indices) > seq_len:
             prompt_indices = prompt_indices[-seq_len:]
         elif len(prompt_indices) < seq_len:
-            prompt_indices = [pad_char] * (seq_len - len(prompt_indices)) + prompt_indices
+            prompt_indices = [pad_char] * (
+                seq_len - len(prompt_indices)
+            ) + prompt_indices
         batch_indices.append(prompt_indices)
 
     # Convert to JAX array
@@ -341,12 +362,12 @@ def main():
     print("Transformer Predictive Coding Demo")
     print("Character-level language modeling on TinyShakespeare")
     print("")
-    print("Not yet tuned in hyperparams and weight initialization for PC training - treat this as a starting point!")
+    print(
+        "Not yet tuned in hyperparams and weight initialization for PC training - treat this as a starting point!"
+    )
     print("=" * 70)
 
-    # Choose training mode (PC or backprop)
-    use_pcn = True  # Set to True to use predictive coding training
-
+    # fmt: off
     # Configuration
     SEQ_LEN = 128        # Sequence length
     EMBED_DIM = 128      # Embedding dimension
@@ -360,6 +381,7 @@ def main():
     ETA_INFER = 0.05    # Inference learning rate
     LR = 1e-3           # Weight learning rate
 
+    # fmt: on
     # Random keys
     master_key = jax.random.PRNGKey(42)
     graph_key, train_key, gen_key = jax.random.split(master_key, 3)
@@ -377,7 +399,9 @@ def main():
     split_idx = int(len(full_text) * 0.9)
     train_text = full_text[:split_idx]
     test_text = full_text[split_idx:]
-    print(f"Train/test split: {len(train_text):,} train / {len(test_text):,} test characters")
+    print(
+        f"Train/test split: {len(train_text):,} train / {len(test_text):,} test characters"
+    )
 
     # Create train dataset (builds vocabulary)
     print("\nTrain dataset:")
@@ -385,7 +409,9 @@ def main():
 
     # Create test dataset (uses train vocabulary)
     print("\nTest dataset:")
-    test_dataset = CharDataset(test_text, seq_len=SEQ_LEN, vocab=train_dataset.get_vocab())
+    test_dataset = CharDataset(
+        test_text, seq_len=SEQ_LEN, vocab=train_dataset.get_vocab()
+    )
 
     train_loader = DataLoaderWrapper(train_dataset, BATCH_SIZE, shuffle=True)
     test_loader = DataLoaderWrapper(test_dataset, BATCH_SIZE, shuffle=False)
@@ -407,7 +433,9 @@ def main():
     params, structure = create_pc_graph(config, graph_key)
 
     total_params = sum(p.size for p in jax.tree_util.tree_leaves(params))
-    print(f"Model created: {len(config['node_list'])} nodes, {len(config['edge_list'])} edges")
+    print(
+        f"Model created: {len(config['node_list'])} nodes, {len(config['edge_list'])} edges"
+    )
     print(f"Total parameters: {total_params:,}")
 
     # Training config for autoregressive training
@@ -423,36 +451,56 @@ def main():
     def create_eval_callback(use_pc: bool):
         """Create appropriate eval callback based on training method."""
         if use_pc:
+
             def eval_callback(epoch_idx, params, structure, config, rng_key):
                 eval_rng = jax.random.fold_in(rng_key, epoch_idx)
                 metrics = evaluate_autoregressive(
-                    params, structure, test_loader,
-                    {"infer_steps": 0, "eta_infer": ETA_INFER, "use_causal_mask": True},  # No inference steps for eval because model predicts feedforward
+                    params,
+                    structure,
+                    test_loader,
+                    {
+                        "infer_steps": 0,
+                        "eta_infer": ETA_INFER,
+                        "use_causal_mask": True,
+                    },  # No inference steps for eval because model predicts feedforward
                     eval_rng,
-                    debug=(epoch_idx == 0)  # Debug first epoch only
+                    debug=(epoch_idx == 0),  # Debug first epoch only
                 )
-                print(f"  Test - Loss: {metrics['loss']:.4f}, Perplexity: {metrics['perplexity']:.2f}, Acc: {metrics['accuracy']:.4f}")
+                print(
+                    f"  Test - Loss: {metrics['loss']:.4f}, Perplexity: {metrics['perplexity']:.2f}, Acc: {metrics['accuracy']:.4f}"
+                )
                 return metrics
+
         else:
+
             def eval_callback(epoch_idx, params, structure, config, rng_key):
                 eval_rng = jax.random.fold_in(rng_key, epoch_idx)
                 # Enable debug on first epoch to diagnose metrics
                 metrics = evaluate_backprop_autoregressive(
-                    params, structure, test_loader,
+                    params,
+                    structure,
+                    test_loader,
                     {"use_causal_mask": True},
                     eval_rng,
-                    debug=(epoch_idx == 0)  # Debug first epoch only
+                    debug=(epoch_idx == 0),  # Debug first epoch only
                 )
-                print(f"  Test - Loss: {metrics['loss']:.4f}, Perplexity: {metrics['perplexity']:.2f}, Acc: {metrics['accuracy']:.4f}")
+                print(
+                    f"  Test - Loss: {metrics['loss']:.4f}, Perplexity: {metrics['perplexity']:.2f}, Acc: {metrics['accuracy']:.4f}"
+                )
                 return metrics
+
         return eval_callback
 
     eval_callback = create_eval_callback(use_pcn)
 
     # Train using autoregressive trainer
-    print("\n[3/5] Training with autoregressive trainer (JIT compilation on first batch)...")
+    print(
+        "\n[3/5] Training with autoregressive trainer (JIT compilation on first batch)..."
+    )
     print(f"Config: {NUM_EPOCHS} epochs, {INFER_STEPS} inference steps, lr={LR}")
-    print(f"Using {'Predictive Coding' if use_pcn else 'Backpropagation'} training method")
+    print(
+        f"Using {'Predictive Coding' if use_pcn else 'Backpropagation'} training method"
+    )
 
     start_time = time.time()
 
@@ -471,15 +519,23 @@ def main():
     else:
         # Backprop (autoregressive)
         trained_params, energy_history, eval_results = train_backprop_autoregressive(
-            params, structure, train_loader,
-            {"num_epochs": NUM_EPOCHS, "optimizer": {"type": "adam", "lr": 1e-3}, "use_causal_mask": True},
+            params,
+            structure,
+            train_loader,
+            {
+                "num_epochs": NUM_EPOCHS,
+                "optimizer": {"type": "adam", "lr": 1e-3},
+                "use_causal_mask": True,
+            },
             train_key,
             epoch_callback=eval_callback,
         )
 
     train_time = time.time() - start_time
 
-    print(f"\nTraining completed in {train_time:.1f}s ({train_time/NUM_EPOCHS:.1f}s per epoch)")
+    print(
+        f"\nTraining completed in {train_time:.1f}s ({train_time/NUM_EPOCHS:.1f}s per epoch)"
+    )
 
     # Generate samples
     print("\n[4/5] Generating sample text...")
@@ -515,15 +571,21 @@ def main():
     # Summary
     print("\n[5/5] Summary")
     print("=" * 70)
-    print(f"Dataset: TinyShakespeare ({len(full_text):,} total, {len(train_text):,} train, {len(test_text):,} test)")
+    print(
+        f"Dataset: TinyShakespeare ({len(full_text):,} total, {len(train_text):,} train, {len(test_text):,} test)"
+    )
     print(f"Vocabulary: {train_dataset.vocab_size} unique characters")
-    print(f"Model: {NUM_BLOCKS} transformer blocks, {EMBED_DIM}d embeddings, {NUM_HEADS} heads")
+    print(
+        f"Model: {NUM_BLOCKS} transformer blocks, {EMBED_DIM}d embeddings, {NUM_HEADS} heads"
+    )
     print(f"Parameters: {total_params:,}")
     print(f"Training: {NUM_EPOCHS} epochs in {train_time:.1f}s")
     print(f"Final train loss: {energy_history[-1][-1]:.4f}")
     if eval_results and eval_results[-1]:
         final_eval = eval_results[-1]
-        print(f"Final test loss: {final_eval['loss']:.4f}, Perplexity: {final_eval['perplexity']:.2f}")
+        print(
+            f"Final test loss: {final_eval['loss']:.4f}, Perplexity: {final_eval['perplexity']:.2f}"
+        )
     print("=" * 70)
 
     return trained_params, structure, train_dataset, test_dataset

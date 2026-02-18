@@ -21,6 +21,7 @@ from fabricpc.core.config import ConfigValidationError
 
 class NodeRegistrationError(RegistrationError):
     """Raised when node registration fails."""
+
     pass
 
 
@@ -33,7 +34,7 @@ _node_registry = Registry(
     attr_validators={
         "CONFIG_SCHEMA": validate_config_schema,
         "DEFAULT_ENERGY_CONFIG": validate_default_energy_config,
-    }
+    },
 )
 _node_registry.set_error_class(NodeRegistrationError)
 
@@ -96,7 +97,9 @@ def clear_registry() -> None:
     _node_registry.clear()
 
 
-def validate_node_config(node_class: Type[NodeBase], config: Dict[str, Any]) -> Dict[str, Any]:
+def validate_node_config(
+    node_class: Type[NodeBase], config: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Validate and apply defaults from node's CONFIG_SCHEMA.
 
@@ -116,8 +119,8 @@ def validate_node_config(node_class: Type[NodeBase], config: Dict[str, Any]) -> 
     from fabricpc.core.config import validate_config
 
     # Merge base schema with node-specific schema
-    base_schema = getattr(NodeBase, 'BASE_CONFIG_SCHEMA', {})
-    node_schema = getattr(node_class, 'CONFIG_SCHEMA', {}) or {}
+    base_schema = getattr(NodeBase, "BASE_CONFIG_SCHEMA", {})
+    node_schema = getattr(node_class, "CONFIG_SCHEMA", {}) or {}
     merged_schema = {**base_schema, **node_schema}
 
     node_name = config.get("name", "unknown")

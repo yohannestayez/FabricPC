@@ -14,12 +14,12 @@ from typing import Dict, Any, Union, Tuple, Type
 
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
+
     pass
 
 
 def transform_shorthand(
-    config: Union[str, Dict[str, Any]],
-    context: str = ""
+    config: Union[str, Dict[str, Any]], context: str = ""
 ) -> Dict[str, Any]:
     """
     Transform string config shorthand to dict form.
@@ -67,9 +67,7 @@ def transform_shorthand(
 
 
 def validate_config(
-    schema: Dict[str, Dict[str, Any]],
-    config: Dict[str, Any],
-    context: str = ""
+    schema: Dict[str, Dict[str, Any]], config: Dict[str, Any], context: str = ""
 ) -> Dict[str, Any]:
     """
     Validate config against schema and apply defaults.
@@ -160,9 +158,7 @@ def validate_config(
 
 
 def validate_typed_config(
-    config: Union[str, Dict[str, Any]],
-    get_class_fn,
-    context: str = ""
+    config: Union[str, Dict[str, Any]], get_class_fn, context: str = ""
 ) -> Dict[str, Any]:
     """
     Validate a typed config (one that has a "type" field referencing a registry).
@@ -191,9 +187,7 @@ def validate_typed_config(
     # Get type and look up class
     type_name = config_dict.get("type")
     if type_name is None:
-        raise ConfigValidationError(
-            f"{context_prefix}missing required 'type' field"
-        )
+        raise ConfigValidationError(f"{context_prefix}missing required 'type' field")
 
     try:
         cls = get_class_fn(type_name)

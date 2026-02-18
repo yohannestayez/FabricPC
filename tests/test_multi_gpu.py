@@ -121,7 +121,9 @@ class SimpleDataLoader:
         for _ in range(self.num_batches):
             rng_key, x_key, y_key = jax.random.split(rng_key, 3)
             x = jax.random.normal(x_key, (self.batch_size, *self.input_shape))
-            y = jnp.tanh(x) + jax.random.normal(y_key, (self.batch_size, *self.output_shape))
+            y = jnp.tanh(x) + jax.random.normal(
+                y_key, (self.batch_size, *self.output_shape)
+            )
             batches.append({"x": x, "y": y})
         return batches
 
@@ -156,12 +158,22 @@ class TestMultiGPUTraining:
 
         # Run single-GPU training
         trained_single, iter_results_single, _ = train_pcn(
-            params_single, structure, train_loader, train_config, train_key1, verbose=False
+            params_single,
+            structure,
+            train_loader,
+            train_config,
+            train_key1,
+            verbose=False,
         )
 
         # Run multi-GPU training
         trained_multi = train_pcn_multi_gpu(
-            params_multi, structure, train_loader, train_config, train_key2, verbose=False
+            params_multi,
+            structure,
+            train_loader,
+            train_config,
+            train_key2,
+            verbose=False,
         )
 
         # Both should complete and return valid parameters
@@ -174,7 +186,9 @@ class TestMultiGPUTraining:
 
     def test_both_methods_reduce_energy(self, simple_config, train_config, rng_key):
         """Test that both training methods reduce energy over training."""
-        model_key, train_key1, train_key2, data_key, eval_key = jax.random.split(rng_key, 5)
+        model_key, train_key1, train_key2, data_key, eval_key = jax.random.split(
+            rng_key, 5
+        )
 
         # Create graph
         params, structure = create_pc_graph(simple_config, model_key)
@@ -192,12 +206,22 @@ class TestMultiGPUTraining:
 
         # Run single-GPU training and capture energies
         trained_single, iter_results_single, _ = train_pcn(
-            params_single, structure, train_loader, train_config, train_key1, verbose=False
+            params_single,
+            structure,
+            train_loader,
+            train_config,
+            train_key1,
+            verbose=False,
         )
 
         # Run multi-GPU training (captures losses internally)
         trained_multi = train_pcn_multi_gpu(
-            params_multi, structure, train_loader, train_config, train_key2, verbose=False
+            params_multi,
+            structure,
+            train_loader,
+            train_config,
+            train_key2,
+            verbose=False,
         )
 
         # Check that single-GPU training reduced energy
@@ -227,8 +251,12 @@ class TestMultiGPUTraining:
         )
 
         # Both should have finite energy
-        assert np.isfinite(metrics_single["energy"]), "Single-GPU eval energy should be finite"
-        assert np.isfinite(metrics_multi["energy"]), "Multi-GPU eval energy should be finite"
+        assert np.isfinite(
+            metrics_single["energy"]
+        ), "Single-GPU eval energy should be finite"
+        assert np.isfinite(
+            metrics_multi["energy"]
+        ), "Multi-GPU eval energy should be finite"
 
     def test_numerical_similarity(self, simple_config, train_config, rng_key):
         """
@@ -257,10 +285,20 @@ class TestMultiGPUTraining:
 
         # Use the SAME training key - results should be identical
         trained_single, _, _ = train_pcn(
-            params_single, structure, train_loader, train_config, train_key, verbose=False
+            params_single,
+            structure,
+            train_loader,
+            train_config,
+            train_key,
+            verbose=False,
         )
         trained_multi = train_pcn_multi_gpu(
-            params_multi, structure, train_loader, train_config, train_key, verbose=False
+            params_multi,
+            structure,
+            train_loader,
+            train_config,
+            train_key,
+            verbose=False,
         )
 
         # Compare actual parameter values element-wise
@@ -284,12 +322,14 @@ class TestMultiGPUTraining:
                     max_rel = float(jnp.max(rel_diff))
                     mean_rel = float(jnp.mean(rel_diff))
 
-                    param_diffs.append({
-                        "node": node_name,
-                        "edge": edge_key,
-                        "max_rel_diff": max_rel,
-                        "mean_rel_diff": mean_rel,
-                    })
+                    param_diffs.append(
+                        {
+                            "node": node_name,
+                            "edge": edge_key,
+                            "max_rel_diff": max_rel,
+                            "mean_rel_diff": mean_rel,
+                        }
+                    )
                     max_relative_diff = max(max_relative_diff, max_rel)
 
         # Single-shard multi-GPU should produce identical results to single-GPU
@@ -323,10 +363,20 @@ class TestMultiGPUTraining:
 
         # Run both trainings
         trained_single, _, _ = train_pcn(
-            params_single, structure, train_loader, train_config, train_key1, verbose=False
+            params_single,
+            structure,
+            train_loader,
+            train_config,
+            train_key1,
+            verbose=False,
         )
         trained_multi = train_pcn_multi_gpu(
-            params_multi, structure, train_loader, train_config, train_key2, verbose=False
+            params_multi,
+            structure,
+            train_loader,
+            train_config,
+            train_key2,
+            verbose=False,
         )
 
         max_allowed_difference = 1e-5
@@ -337,12 +387,18 @@ class TestMultiGPUTraining:
                 multi_params = trained_multi.nodes[node_name]
 
                 for edge_key in single_params.weights:
-                    single_norm = float(jnp.linalg.norm(single_params.weights[edge_key]))
+                    single_norm = float(
+                        jnp.linalg.norm(single_params.weights[edge_key])
+                    )
                     multi_norm = float(jnp.linalg.norm(multi_params.weights[edge_key]))
 
                     # Both should have non-zero weights
-                    assert single_norm > 0, f"Single-GPU {node_name}/{edge_key} weights should be non-zero"
-                    assert multi_norm > 0, f"Multi-GPU {node_name}/{edge_key} weights should be non-zero"
+                    assert (
+                        single_norm > 0
+                    ), f"Single-GPU {node_name}/{edge_key} weights should be non-zero"
+                    assert (
+                        multi_norm > 0
+                    ), f"Multi-GPU {node_name}/{edge_key} weights should be non-zero"
 
                     # Norms should be in same order of magnitude
                     if single_norm > 0 and multi_norm > 0:
@@ -402,12 +458,17 @@ class TestMultiGPUUtilities:
         for node_name, node_params in replicated.nodes.items():
             for edge_key, weight in node_params.weights.items():
                 original_weight = params.nodes[node_name].weights[edge_key]
-                assert weight.shape == (2, *original_weight.shape), (
-                    f"Replicated weight shape mismatch for {node_name}/{edge_key}"
-                )
+                assert weight.shape == (
+                    2,
+                    *original_weight.shape,
+                ), f"Replicated weight shape mismatch for {node_name}/{edge_key}"
                 # Both replicas should be identical
-                assert jnp.allclose(weight[0], weight[1]), "Replicas should be identical"
-                assert jnp.allclose(weight[0], original_weight), "Replica should match original"
+                assert jnp.allclose(
+                    weight[0], weight[1]
+                ), "Replicas should be identical"
+                assert jnp.allclose(
+                    weight[0], original_weight
+                ), "Replica should match original"
 
     def test_unshard_energies(self):
         """Test energy unsharding utility."""

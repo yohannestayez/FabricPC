@@ -86,7 +86,7 @@ def compute_local_weight_gradients(
             params.nodes[node_name],
             in_edges_data,
             final_state.nodes[node_name],
-            node_info
+            node_info,
         )
 
         # Store gradients
@@ -144,15 +144,13 @@ def initialize_params(
 
         # Initialize parameters of the node
         params_obj = node_class.initialize_params(
-            keys[key_idx],
-            node_info.shape,
-            input_shapes,
-            node_info.node_config
+            keys[key_idx], node_info.shape, input_shapes, node_info.node_config
         )
         key_idx += 1
         node_params[node_name] = params_obj
 
     return GraphParams(nodes=node_params)
+
 
 def set_latents_to_clamps(
     state: GraphState,
@@ -172,6 +170,7 @@ def set_latents_to_clamps(
         if node_name in state.nodes:
             state = update_node_in_state(state, node_name, z_latent=clamp_value)
     return state
+
 
 def create_pc_graph(
     config: dict,

@@ -5,6 +5,7 @@ Tests registration, lookup, config validation, and entry point discovery.
 """
 
 import os
+
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
 import pytest
@@ -70,6 +71,7 @@ class TestCustomNodeRegistration:
 
     def test_register_custom_node(self):
         """Test registering a custom node type."""
+
         @register_node("test_custom")
         class TestCustomNode(NodeBase):
             CONFIG_SCHEMA = {}
@@ -94,6 +96,7 @@ class TestCustomNodeRegistration:
 
     def test_duplicate_registration_different_class_raises(self):
         """Test that registering same type with different class raises."""
+
         @register_node("test_dup")
         class TestNode1(NodeBase):
             CONFIG_SCHEMA = {}
@@ -112,6 +115,7 @@ class TestCustomNodeRegistration:
 
         try:
             with pytest.raises(NodeRegistrationError) as exc_info:
+
                 @register_node("test_dup")
                 class TestNode2(NodeBase):
                     CONFIG_SCHEMA = {}
@@ -134,6 +138,7 @@ class TestCustomNodeRegistration:
 
     def test_idempotent_registration_same_class(self):
         """Test that registering same class twice is OK."""
+
         @register_node("test_idem")
         class TestIdemNode(NodeBase):
             CONFIG_SCHEMA = {}
@@ -159,6 +164,7 @@ class TestCustomNodeRegistration:
 
     def test_unregister_node(self):
         """Test that unregister_node removes the node type."""
+
         @register_node("test_unreg")
         class TestUnregNode(NodeBase):
             CONFIG_SCHEMA = {}
@@ -186,6 +192,7 @@ class TestInterfaceValidation:
     def test_missing_config_schema_raises(self):
         """Test that missing CONFIG_SCHEMA raises error."""
         with pytest.raises(NodeRegistrationError) as exc_info:
+
             @register_node("test_missing_schema")
             class MissingSchemaNode(NodeBase):
                 @staticmethod
@@ -205,6 +212,7 @@ class TestInterfaceValidation:
     def test_missing_forward_raises(self):
         """Test that missing forward method raises error."""
         with pytest.raises(NodeRegistrationError) as exc_info:
+
             @register_node("test_missing_forward")
             class MissingForwardNode(NodeBase):
                 CONFIG_SCHEMA = {}
@@ -228,7 +236,12 @@ class TestConfigValidation:
 
     def test_schema_applies_defaults(self):
         """Test that LinearNode's CONFIG_SCHEMA applies defaults."""
-        config = {"name": "test", "shape": (10,), "type": "linear", "custom_field": "value"}
+        config = {
+            "name": "test",
+            "shape": (10,),
+            "type": "linear",
+            "custom_field": "value",
+        }
         result = validate_node_config(LinearNode, config)
         # Original fields preserved
         assert result["name"] == "test"
@@ -239,9 +252,14 @@ class TestConfigValidation:
 
     def test_required_field_missing_raises(self):
         """Test that missing required field raises ValueError."""
+
         class NodeWithSchema(NodeBase):
             CONFIG_SCHEMA = {
-                "kernel_size": {"type": tuple, "required": True, "description": "Kernel dims"},
+                "kernel_size": {
+                    "type": tuple,
+                    "required": True,
+                    "description": "Kernel dims",
+                },
             }
 
             @staticmethod
@@ -257,13 +275,19 @@ class TestConfigValidation:
                 return jnp.array(0.0), state
 
         from fabricpc.core.config import ConfigValidationError
-        config = {"name": "test", "shape": (10,), "type": "custom"}  # missing kernel_size
+
+        config = {
+            "name": "test",
+            "shape": (10,),
+            "type": "custom",
+        }  # missing kernel_size
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_node_config(NodeWithSchema, config)
         assert "kernel_size" in str(exc_info.value)
 
     def test_type_mismatch_raises(self):
         """Test that wrong type raises ConfigValidationError."""
+
         class NodeWithSchema(NodeBase):
             CONFIG_SCHEMA = {
                 "stride": {"type": tuple},
@@ -282,7 +306,13 @@ class TestConfigValidation:
                 return jnp.array(0.0), state
 
         from fabricpc.core.config import ConfigValidationError
-        config = {"name": "test", "shape": (10,), "type": "custom", "stride": [1, 1]}  # list instead of tuple
+
+        config = {
+            "name": "test",
+            "shape": (10,),
+            "type": "custom",
+            "stride": [1, 1],
+        }  # list instead of tuple
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_node_config(NodeWithSchema, config)
         assert "stride" in str(exc_info.value)
@@ -290,6 +320,7 @@ class TestConfigValidation:
 
     def test_choices_validation_raises(self):
         """Test that invalid choice raises ValueError."""
+
         class NodeWithSchema(NodeBase):
             CONFIG_SCHEMA = {
                 "padding": {"type": str, "choices": ["valid", "same"]},
@@ -308,7 +339,13 @@ class TestConfigValidation:
                 return jnp.array(0.0), state
 
         from fabricpc.core.config import ConfigValidationError
-        config = {"name": "test", "shape": (10,), "type": "custom", "padding": "full"}  # not in choices
+
+        config = {
+            "name": "test",
+            "shape": (10,),
+            "type": "custom",
+            "padding": "full",
+        }  # not in choices
         with pytest.raises(ConfigValidationError) as exc_info:
             validate_node_config(NodeWithSchema, config)
         assert "padding" in str(exc_info.value)
@@ -316,6 +353,7 @@ class TestConfigValidation:
 
     def test_defaults_applied(self):
         """Test that missing optional field gets default value."""
+
         class NodeWithSchema(NodeBase):
             CONFIG_SCHEMA = {
                 "stride": {"type": tuple, "default": (1, 1)},
@@ -334,7 +372,11 @@ class TestConfigValidation:
             def forward(params, inputs, state, node_info):
                 return jnp.array(0.0), state
 
-        config = {"name": "test", "shape": (10,), "type": "custom"}  # missing stride and padding
+        config = {
+            "name": "test",
+            "shape": (10,),
+            "type": "custom",
+        }  # missing stride and padding
         result = validate_node_config(NodeWithSchema, config)
         assert result["stride"] == (1, 1)
         assert result["padding"] == "valid"
