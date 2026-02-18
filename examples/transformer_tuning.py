@@ -82,6 +82,10 @@ def trial_model(config, rng_key):
     depth = config.get("depth", 1)
     seq_len = config.get("seq_len", 32)
     vocab_size = config.get("vocab_size", 65)
+    
+    # Weight initialization config
+    weight_init_std = config.get("weight_init_std", 0.02)
+    weight_init = {"type": "normal", "std": weight_init_std}
 
     if embed_dim % num_heads != 0:
         raise optuna.TrialPruned(
@@ -95,6 +99,7 @@ def trial_model(config, rng_key):
         mlp_dim=mlp_dim,
         seq_len=seq_len,
         vocab_size=vocab_size,
+        weight_init=weight_init,
     )
 
     # Multi-GPU training expects: params, structure
@@ -118,6 +123,9 @@ def search_space_transformer(trial):
     infer_steps = trial.suggest_int("infer_steps", 10, 30)
     eta_infer = trial.suggest_float("eta_infer", 0.01, 0.2)
     depth = trial.suggest_int("depth", 1, 12)
+    
+    # Tuning weight initialization scale
+    weight_init_std = trial.suggest_float("weight_init_std", 0.005, 0.05, log=True)
 
     return {
         "lr": lr,
@@ -128,6 +136,7 @@ def search_space_transformer(trial):
         "depth": depth,
         "infer_steps": infer_steps,
         "eta_infer": eta_infer,
+        "weight_init_std": weight_init_std,
     }
 
 
