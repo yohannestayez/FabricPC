@@ -73,6 +73,7 @@ from fabricpc.core.types import (
 # State Initializer Base Class
 # =============================================================================
 
+
 class StateInitBase(ABC):
     """
     Abstract base class for graph state initialization strategies.
@@ -116,7 +117,7 @@ class StateInitBase(ABC):
         params: GraphParams = None,
     ) -> GraphState:
         """
-        Initialize graph state for inference.
+        Initialize graph state for inference. Apply data clamps to latent states if provided.
 
         Args:
             structure: Graph structure
@@ -136,8 +137,10 @@ class StateInitBase(ABC):
 # State Initializer Registry
 # =============================================================================
 
+
 class StateInitRegistrationError(RegistrationError):
     """Raised when state initializer registration fails."""
+
     pass
 
 
@@ -149,7 +152,7 @@ _state_init_registry = Registry(
     required_methods=["initialize_state"],
     attr_validators={
         "CONFIG_SCHEMA": validate_config_schema,
-    }
+    },
 )
 _state_init_registry.set_error_class(StateInitRegistrationError)
 
@@ -213,8 +216,7 @@ def clear_state_init_registry() -> None:
 
 
 def validate_state_init_config(
-    state_init_class: Type[StateInitBase],
-    config: Dict[str, Any]
+    state_init_class: Type[StateInitBase], config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Validate and apply defaults from state_init's CONFIG_SCHEMA.
@@ -231,7 +233,7 @@ def validate_state_init_config(
     """
     from fabricpc.core.config import validate_config
 
-    schema = getattr(state_init_class, 'CONFIG_SCHEMA', None)
+    schema = getattr(state_init_class, "CONFIG_SCHEMA", None)
     init_type = config.get("type", "unknown") if config else "unknown"
     return validate_config(schema, config, context=f"state_init '{init_type}'")
 
@@ -254,6 +256,7 @@ def discover_external_state_inits() -> None:
 # Built-in State Initialization Strategies
 # =============================================================================
 
+
 @register_state_init("global")
 class GlobalStateInit(StateInitBase):
     """
@@ -270,7 +273,7 @@ class GlobalStateInit(StateInitBase):
         "initializer": {
             "type": dict,
             "default": {"type": "normal", "mean": 0.0, "std": 0.05},
-            "description": "Global initializer config for all nodes, any type supported by fabricpc.core.initializers.initialize"
+            "description": "Global initializer config for all nodes, any type supported by fabricpc.core.initializers.initialize",
         },
     }
 
@@ -300,7 +303,9 @@ class GlobalStateInit(StateInitBase):
             if node_name in clamps:
                 z_latent = clamps[node_name]
             else:
-                z_latent = initialize(node_key_map[node_name], shape, global_init_config)
+                z_latent = initialize(
+                    node_key_map[node_name], shape, global_init_config
+                )
 
             node_state_dict[node_name] = NodeState(
                 z_latent=z_latent,
@@ -314,6 +319,7 @@ class GlobalStateInit(StateInitBase):
 
         return GraphState(nodes=node_state_dict, batch_size=batch_size)
 
+
 @register_state_init("node_distribution")
 class NodeDistributionStateInit(StateInitBase):
     """
@@ -325,9 +331,7 @@ class NodeDistributionStateInit(StateInitBase):
     none
     """
 
-    CONFIG_SCHEMA = {
-    }  # No additional config options
-
+    CONFIG_SCHEMA = {}  # No additional config options
 
     @staticmethod
     def initialize_state(
@@ -368,6 +372,7 @@ class NodeDistributionStateInit(StateInitBase):
 
         return GraphState(nodes=node_state_dict, batch_size=batch_size)
 
+
 @register_state_init("feedforward")
 class FeedforwardStateInit(StateInitBase):
     """
@@ -384,8 +389,7 @@ class FeedforwardStateInit(StateInitBase):
     none
     """
 
-    CONFIG_SCHEMA = {
-    }  # No additional config options
+    CONFIG_SCHEMA = {}  # No additional config options
 
     @staticmethod
     def initialize_state(
@@ -441,7 +445,9 @@ class FeedforwardStateInit(StateInitBase):
                 node_class = get_node_class(node_info.node_type)
                 edge_inputs = gather_inputs(node_info, structure, state)
 
-                _, projected = node_class.forward(node_params, edge_inputs, node_state, node_info)
+                _, projected = node_class.forward(
+                    node_params, edge_inputs, node_state, node_info
+                )
                 # node forward modifies z_mu, pre_activation, error, and energy
 
                 if node_name not in clamps:
@@ -469,6 +475,7 @@ class FeedforwardStateInit(StateInitBase):
 # =============================================================================
 # Convenience Functions
 # =============================================================================
+
 
 def initialize_graph_state(
     structure: GraphStructure,

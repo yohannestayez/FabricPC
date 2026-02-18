@@ -16,9 +16,9 @@ from fabricpc.utils.helpers import update_node_in_state
 
 
 def gather_inputs(
-        node_info: NodeInfo,
-        structure: GraphStructure,
-        state: GraphState,
+    node_info: NodeInfo,
+    structure: GraphStructure,
+    state: GraphState,
 ) -> Dict[str, jax.Array]:
     """
     Gather inputs for a node from the graph structure.
@@ -27,9 +27,12 @@ def gather_inputs(
     for edge_key in node_info.in_edges:
         edge_info = structure.edges[edge_key]  # get the edge object
         node = edge_info.source
-        in_edges_data[edge_key] = state.nodes[node].z_latent  # get the data sent along this edge
+        in_edges_data[edge_key] = state.nodes[
+            node
+        ].z_latent  # get the data sent along this edge
 
     return in_edges_data
+
 
 def inference_step(
     params: GraphParams,
@@ -52,6 +55,8 @@ def inference_step(
         Updated graph state
     """
 
+    # TODO parallelize over nodes for efficiency
+
     # 1. Zero the latent gradients
     for node_name in structure.nodes:
         # Reset gradients
@@ -71,29 +76,27 @@ def inference_step(
         in_edges_data = gather_inputs(node_info, structure, state)
 
         # Compute predictions, error, and latent gradient contributions
-        node_state, inedge_grads = node_class.forward_inference(node_params, in_edges_data, node_state, node_info)
+        node_state, inedge_grads = node_class.forward_inference(
+            node_params,
+            in_edges_data,
+            node_state,
+            node_info,
+            is_clamped=(node_name in clamps),
+        )
 
         # Update the graph state with node state containing errors and energy
         state = state._replace(nodes={**state.nodes, node_name: node_state})
 
-        # Accumulate gradient contributions to this node's sources (backward pass)
+        # Accumulate gradient contributions to this node's sources (local backward pass to in-neighbors)
         for edge_key, grad in inedge_grads.items():
-            source_name = structure.edges[edge_key].source  # Look up node name from edge key
+            source_name = structure.edges[
+                edge_key
+            ].source  # Look up node name from edge key
             latent_grad = state.nodes[source_name].latent_grad
-            latent_grad = latent_grad + grad  # Send gradient contribution to source node
+            latent_grad = (
+                latent_grad + grad
+            )  # Send gradient contribution to source node
             state = update_node_in_state(state, source_name, latent_grad=latent_grad)
-
-    # TODO if using preactivation latents, multiply by activation derivative here
-    # Or apply the pre-synaptic activations to inputs during the node's forward_inference method (using autodif) or apply the activation derivative in the node's explicit gradient method
-    # if latent_type == "preactivation":
-    #     for node_name in structure.nodes:
-    #         node_state = state.nodes[node_name]
-    #         node_info = structure.nodes[node_name]
-    #         _, act_deriv = get_activation(node_info.node_config["activation"])
-    #         latent_grad = state.nodes[node_name].latent_grad
-    #         latent_grad = latent_grad * act_deriv(node_state.pre_activation)
-    #         # Update the state with new latent gradients
-    #         state = update_node_in_state(state, node_name, latent_grad)
 
     # 3. Update latent states by gradient descent
     for node_name in structure.nodes:
@@ -112,6 +115,7 @@ def inference_step(
         state = update_node_in_state(state, node_name, substructure={})
 
     return state
+
 
 def run_inference(
     params: GraphParams,

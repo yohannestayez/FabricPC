@@ -18,7 +18,7 @@ PC performs bilevel optimization: an inner loop infers latent activations by min
 - Potential novel plasticity rules for continual learning
 
 There are various flavors of PC. FabricPC provides a graph-based implementation that focuses on principles:
-- Local learning rules
+- Local (Hebbian) learning rules
 - Parallel processing of nodes
 - Expectation-maximization style inference.
 - Modularity of components
@@ -44,7 +44,7 @@ python examples/mnist_demo.py
 ## Features
 - Modular node and wire abstractions for flexible model construction
 - Inherently supports arbitrary architectures: feedforward, recurrent, skip connections, etc.
-- Support for various node types: Linear, Conv1D/2D/3D (planned), Transfomers (planned)
+- Support for various node types: Linear, Conv1D/2D/3D (planned), Transfomers (in progress)
 - Local automatic differentiation for efficient inference and learning
 - JAX backend for GPU acceleration and scalability
 

@@ -60,6 +60,7 @@ from fabricpc.core.registry import Registry, RegistrationError, validate_config_
 # Energy Functional Base Class
 # =============================================================================
 
+
 class EnergyFunctional(ABC):
     """
     Abstract base class for energy functionals.
@@ -103,9 +104,7 @@ class EnergyFunctional(ABC):
     @staticmethod
     @abstractmethod
     def energy(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute energy E(z_latent, z_mu).
@@ -126,12 +125,10 @@ class EnergyFunctional(ABC):
     @staticmethod
     @abstractmethod
     def grad_latent(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
-        Compute gradient ∂E/∂z_latent.
+        Compute gradient ∂E/∂z_latent of the node's self latent state.
 
         Args:
             z_latent: Latent states, shape (batch, *dims)
@@ -152,8 +149,10 @@ class EnergyFunctional(ABC):
 # Energy Registry
 # =============================================================================
 
+
 class EnergyRegistrationError(RegistrationError):
     """Raised when energy functional registration fails."""
+
     pass
 
 
@@ -165,7 +164,7 @@ _energy_registry = Registry(
     required_methods=["energy", "grad_latent"],
     attr_validators={
         "CONFIG_SCHEMA": validate_config_schema,
-    }
+    },
 )
 _energy_registry.set_error_class(EnergyRegistrationError)
 
@@ -232,8 +231,7 @@ def clear_energy_registry() -> None:
 
 
 def validate_energy_config(
-    energy_class: Type[EnergyFunctional],
-    config: Dict[str, Any]
+    energy_class: Type[EnergyFunctional], config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Validate and apply defaults from energy's CONFIG_SCHEMA.
@@ -250,7 +248,7 @@ def validate_energy_config(
     """
     from fabricpc.core.config import validate_config
 
-    schema = getattr(energy_class, 'CONFIG_SCHEMA', None)
+    schema = getattr(energy_class, "CONFIG_SCHEMA", None)
     energy_type = config.get("type", "unknown") if config else "unknown"
     return validate_config(schema, config, context=f"energy '{energy_type}'")
 
@@ -273,6 +271,7 @@ def discover_external_energy() -> None:
 # Built-in Energy Functionals
 # =============================================================================
 
+
 @register_energy("gaussian")
 class GaussianEnergy(EnergyFunctional):
     """
@@ -293,15 +292,13 @@ class GaussianEnergy(EnergyFunctional):
         "precision": {
             "type": (int, float),
             "default": 1.0,
-            "description": "Precision (1/variance) of the Gaussian. Higher = tighter fit."
+            "description": "Precision (1/variance) of the Gaussian. Higher = tighter fit.",
         }
     }
 
     @staticmethod
     def energy(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute Gaussian energy: E = (precision/2) * ||z - μ||²
@@ -312,13 +309,11 @@ class GaussianEnergy(EnergyFunctional):
         diff = z_latent - z_mu
         # Sum over all non-batch dimensions
         axes_to_sum = tuple(range(1, len(diff.shape)))
-        return 0.5 * precision * jnp.sum(diff ** 2, axis=axes_to_sum)
+        return 0.5 * precision * jnp.sum(diff**2, axis=axes_to_sum)
 
     @staticmethod
     def grad_latent(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute gradient: ∂E/∂z = precision * (z - μ)
@@ -345,15 +340,13 @@ class BernoulliEnergy(EnergyFunctional):
         "eps": {
             "type": (int, float),
             "default": 1e-7,
-            "description": "Small constant for numerical stability in log"
+            "description": "Small constant for numerical stability in log",
         }
     }
 
     @staticmethod
     def energy(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute Bernoulli (BCE) energy: E = -Σ[z*log(μ) + (1-z)*log(1-μ)]
@@ -369,9 +362,7 @@ class BernoulliEnergy(EnergyFunctional):
 
     @staticmethod
     def grad_latent(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute gradient: ∂E/∂z = -log(μ) + log(1-μ) = log((1-μ)/μ)
@@ -407,20 +398,18 @@ class CrossEntropyEnergy(EnergyFunctional):
         "eps": {
             "type": (int, float),
             "default": 1e-7,
-            "description": "Small constant for numerical stability in log"
+            "description": "Small constant for numerical stability in log",
         },
         "axis": {
             "type": int,
             "default": -1,
-            "description": "Axis along which probabilities sum to 1"
-        }
+            "description": "Axis along which probabilities sum to 1",
+        },
     }
 
     @staticmethod
     def energy(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute cross_entropy (CE) energy: E = -Σ z_i * log(μ_i)
@@ -436,9 +425,7 @@ class CrossEntropyEnergy(EnergyFunctional):
 
     @staticmethod
     def grad_latent(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute gradient: ∂E/∂z = -log(μ)
@@ -470,15 +457,13 @@ class LaplacianEnergy(EnergyFunctional):
         "scale": {
             "type": (int, float),
             "default": 1.0,
-            "description": "Scale parameter b of Laplace distribution"
+            "description": "Scale parameter b of Laplace distribution",
         }
     }
 
     @staticmethod
     def energy(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute Laplacian energy: E = (1/b) * Σ|z - μ|
@@ -491,9 +476,7 @@ class LaplacianEnergy(EnergyFunctional):
 
     @staticmethod
     def grad_latent(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute gradient: ∂E/∂z = (1/b) * sign(z - μ)
@@ -520,15 +503,13 @@ class HuberEnergy(EnergyFunctional):
         "delta": {
             "type": (int, float),
             "default": 1.0,
-            "description": "Threshold for switching from quadratic to linear"
+            "description": "Threshold for switching from quadratic to linear",
         }
     }
 
     @staticmethod
     def energy(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute Huber energy.
@@ -538,7 +519,7 @@ class HuberEnergy(EnergyFunctional):
         abs_diff = jnp.abs(diff)
 
         # Quadratic region
-        quadratic = 0.5 * diff ** 2
+        quadratic = 0.5 * diff**2
         # Linear region
         linear = delta * (abs_diff - 0.5 * delta)
 
@@ -549,9 +530,7 @@ class HuberEnergy(EnergyFunctional):
 
     @staticmethod
     def grad_latent(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute gradient: clipped to [-δ, δ]
@@ -592,20 +571,18 @@ class KLDivergenceEnergy(EnergyFunctional):
         "eps": {
             "type": (int, float),
             "default": 1e-7,
-            "description": "Small constant for numerical stability in log"
+            "description": "Small constant for numerical stability in log",
         },
         "axis": {
             "type": int,
             "default": -1,
-            "description": "Axis along which probabilities sum to 1"
-        }
+            "description": "Axis along which probabilities sum to 1",
+        },
     }
 
     @staticmethod
     def energy(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute KL divergence energy: E = Σ z * log(z / μ)
@@ -632,9 +609,7 @@ class KLDivergenceEnergy(EnergyFunctional):
 
     @staticmethod
     def grad_latent(
-        z_latent: jnp.ndarray,
-        z_mu: jnp.ndarray,
-        config: Dict[str, Any] = None
+        z_latent: jnp.ndarray, z_mu: jnp.ndarray, config: Dict[str, Any] = None
     ) -> jnp.ndarray:
         """
         Compute gradient: ∂E/∂z = log(z / μ) + 1 = log(z) - log(μ) + 1
@@ -661,10 +636,9 @@ class KLDivergenceEnergy(EnergyFunctional):
 # Convenience Functions
 # =============================================================================
 
+
 def compute_energy(
-    z_latent: jnp.ndarray,
-    z_mu: jnp.ndarray,
-    energy_config: Dict[str, Any] = None
+    z_latent: jnp.ndarray, z_mu: jnp.ndarray, energy_config: Dict[str, Any] = None
 ) -> jnp.ndarray:
     """
     Compute energy using the specified energy functional.
@@ -694,9 +668,7 @@ def compute_energy(
 
 
 def compute_energy_gradient(
-    z_latent: jnp.ndarray,
-    z_mu: jnp.ndarray,
-    energy_config: Dict[str, Any] = None
+    z_latent: jnp.ndarray, z_mu: jnp.ndarray, energy_config: Dict[str, Any] = None
 ) -> jnp.ndarray:
     """
     Compute energy gradient w.r.t. z_latent.
@@ -726,9 +698,7 @@ def compute_energy_gradient(
 
 
 def get_energy_and_gradient(
-    z_latent: jnp.ndarray,
-    z_mu: jnp.ndarray,
-    energy_config: Dict[str, Any] = None
+    z_latent: jnp.ndarray, z_mu: jnp.ndarray, energy_config: Dict[str, Any] = None
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """
     Compute both energy and gradient efficiently.

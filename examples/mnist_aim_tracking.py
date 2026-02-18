@@ -156,10 +156,10 @@ if TRACKING_ENABLED:
         experiment_name="mnist_pcn_tracking",
         run_name=f"5layer_lr{train_config['optimizer']['lr']}_infer{train_config['infer_steps']}",
         # Batch-level tracking
-        track_batch_energy=True,  # TODO replace related references to "loss" with "energy" for clarity
+        track_batch_energy=True,
         track_batch_energy_per_node=True,
         # Epoch-level tracking
-        track_epoch_energy=True,  # TODO replace related references to "loss" with "energy" for clarity
+        track_epoch_energy=True,
         track_epoch_accuracy=True,
         track_weight_distributions=True,
         track_latent_distributions=True,

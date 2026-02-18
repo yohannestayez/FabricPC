@@ -17,6 +17,7 @@ from fabricpc.core.types import NodeParams, NodeState, NodeInfo, SlotInfo, EdgeI
 @dataclass(frozen=True)
 class SlotSpec:
     """Specification for an input slot to a node."""
+
     name: str
     is_multi_input: bool  # True = multiple inputs allowed, False = single input only
 
@@ -24,6 +25,7 @@ class SlotSpec:
 @dataclass(frozen=True)
 class Slot:
     """Runtime slot information with connected edges."""
+
     spec: SlotSpec
     in_neighbors: Dict[str, str]  # edge_key -> source_node_name mapping
 
@@ -85,7 +87,7 @@ class FlattenInputMixin:
         inputs: Dict[str, jnp.ndarray],
         weights: Dict[str, jnp.ndarray],
         batch_size: int,
-        out_shape: Tuple[int, ...]
+        out_shape: Tuple[int, ...],
     ) -> jnp.ndarray:
         """
         Compute linear transformation: sum of (flattened_input @ weight) for each edge.
@@ -103,12 +105,15 @@ class FlattenInputMixin:
             Pre-activation tensor of shape (batch, *out_shape)
         """
         import numpy as np
+
         out_numel = int(np.prod(out_shape))
         pre_activation_flat = jnp.zeros((batch_size, out_numel))
 
         for edge_key, x in inputs.items():
             x_flat = FlattenInputMixin.flatten_input(x)
-            pre_activation_flat = pre_activation_flat + jnp.matmul(x_flat, weights[edge_key])
+            pre_activation_flat = pre_activation_flat + jnp.matmul(
+                x_flat, weights[edge_key]
+            )
 
         return FlattenInputMixin.reshape_output(pre_activation_flat, out_shape)
 
@@ -152,12 +157,14 @@ class NodeBase(ABC):
 
     # Node-level state initialization config
     DEFAULT_LATENT_INIT: Dict[str, Any] = {"type": "normal"}
-    
+
     @staticmethod
     @abstractmethod
     def get_slots() -> Dict[str, SlotSpec]:
         """
         Define the input slots for this node type.
+        Create as many named input slots as needed, and specify whether each slot allows multiple inputs.
+        Don't set is_multi_input=True unless you intend to aggregate an arbitrary number of inputs to a single named slot and create appropriate parameters and forward logic to handle that.
 
         Returns:
             Dictionary mapping slot names to SlotSpec objects
@@ -176,11 +183,11 @@ class NodeBase(ABC):
         key: jax.Array,  # from jax.random.PRNGKey
         node_shape: Tuple[int, ...],
         input_shapes: Dict[str, Tuple[int, ...]],  # edge_key -> source shape
-        config: Dict[str, Any]
+        config: Dict[str, Any],
     ) -> NodeParams:
         """
-        Initialize parameters for this node.
-        Describe the weights and biases structure in the docstring.
+        Define and initialize the parameters required for the node.
+        Describe the weights and biases structure in your docstring.
 
         Args:
             key: JAX random key
@@ -192,11 +199,12 @@ class NodeBase(ABC):
             NodeParams with initialized weights and biases
 
         Example:
-            For a linear node with inputs from edge "a->b:in":
-            in_numel = int(np.prod(input_shapes["a->b:in"]))
-            out_numel = int(np.prod(node_shape))
-            weights = {"a->b:in": initialize(config, key, (in_numel, out_numel))}
-            biases = {"b": jnp.zeros((1,) + node_shape)}
+            from fabricpc.core.initializers import initialize
+            in_features = next(iter(input_shapes.values()))[-1]  # Assuming single input edge and last dimension is feature size
+            out_features = node_shape[-1]
+
+            weights = {"a->b:in": initialize(config, key, (in_features, out_features))}
+            biases = {"bias": jnp.zeros((1, out_features))}
             return NodeParams(weights=weights, biases=biases)
         """
         pass
@@ -207,15 +215,22 @@ class NodeBase(ABC):
         inputs: Dict[str, jnp.ndarray],  # EdgeInfo.key -> inputs data
         state: NodeState,  # state object for the present node
         node_info: NodeInfo,
+        is_clamped: bool,
     ) -> Tuple[NodeState, Dict[str, jnp.ndarray]]:
         """
         Forward pass: updates node state and computes gradients w.r.t. inputs.
+        Don't override this method. Instead, implement forward() and JAX will handle the gradients.
+
+        PC has two contributions to latent gradients during inference:
+        1. Gradient w.r.t. inputs (delE/delX): used to update the latent states of in-neighbor nodes during inference.
+        2. Gradient w.r.t. node's self latent state (delE/delZ): computed in the energy functional and accumulated to the node gradient (latent_grad).
 
         Args:
             params: Node parameters (weights, biases)
             inputs: Dictionary mapping edge keys to input tensors
             state: state object for the present node
             node_info: NodeInfo object (contains activation function, etc.)
+            is_clamped: Whether this node is clamped to data
 
         Returns:
             Tuple of (NodeState, gradient_wrt_inputs):
@@ -223,14 +238,59 @@ class NodeBase(ABC):
                 - gradient_wrt_inputs: dictionary of gradients w.r.t. each input edge
         """
         from fabricpc.nodes import get_node_class
+
         node_class = get_node_class(node_info.node_type)
 
-        # Use JAX's value_and_grad to compute gradients w.r.t. inputs
-        (total_energy, new_state), input_grads = jax.value_and_grad(
-            node_class.forward,
-            argnums=1,  # inputs
-            has_aux=True
-        )(params, inputs, state, node_info)
+        # Handle terminal nodes
+        if node_info.in_degree == 0:
+            # No inputs!
+            # This is a terminal input node of the graph. It might be clamped to data, or it might be a source of top-down predictions. Either way, the gradients are zero.
+
+            # Update z_mu <-- z_latent, so error is zero.
+            new_state = state._replace(
+                z_mu=state.z_latent,
+                error=jnp.zeros_like(state.error),
+                pre_activation=jnp.zeros_like(state.pre_activation),
+            )
+            # Update the state's energy and self-latent gradient; will be zero since z_mu = z_latent
+            new_state = node_class.energy_functional(new_state, node_info)
+            # Gradient to inputs is zero since there are no inputs
+            input_grads = {
+                edge_key: jnp.zeros_like(inputs[edge_key]) for edge_key in inputs
+            }
+
+        elif node_info.out_degree == 0 and not is_clamped:
+            # No post-synaptic targets and no clamped data!
+            # This happens for output nodes when the model is run in inference/evaluation mode (not training)
+            # Compute its projection (z_mu) but no gradient since it doesn't contribute to any error.
+            total_energy, new_state = node_class.forward(
+                params, inputs, state, node_info
+            )
+            # Update keeping the projection, but zero error.
+            new_state = new_state._replace(
+                z_latent=new_state.z_mu,
+                error=jnp.zeros_like(new_state.error),
+                energy=jnp.zeros_like(new_state.energy),
+                latent_grad=jnp.zeros_like(new_state.latent_grad),
+            )
+            input_grads = {
+                edge_key: jnp.zeros_like(inputs[edge_key]) for edge_key in inputs
+            }
+
+        else:
+            # Internal node or a clamped output node. Compute the energy and gradients.
+            # Use JAX's value_and_grad to compute gradients w.r.t. inputs
+            (total_energy, new_state), input_grads = jax.value_and_grad(
+                node_class.forward, argnums=1, has_aux=True  # inputs
+            )(params, inputs, state, node_info)
+            # TODO if using preactivation latents, need to wrap the node_class.forward() with method to apply pre-synaptic activation function to the inputs first.
+            # TODO Refactor node_class.forward()
+            #   - node_class.forward only computes the projection z_mu
+            #   - Remove pre-activation from NodeState; it's unnecessary to store!
+            #   - Wrapper method here computes:
+            #       - error = state.z_latent - z_mu
+            #       - state = node_class.energy_functional(state, node_info)
+            #       - total_energy = jnp.sum(state.energy)
 
         return new_state, input_grads
 
@@ -239,10 +299,11 @@ class NodeBase(ABC):
         params: NodeParams,
         inputs: Dict[str, jnp.ndarray],
         state: NodeState,  # state object for the present node
-        node_info: NodeInfo
+        node_info: NodeInfo,
     ) -> Tuple[NodeState, NodeParams]:
         """
         Forward pass: update state and compute gradients of weights for local learning.
+        # Don't override this method. Instead, implement forward() and JAX will handle the gradients.
 
         The local gradient for weights is: delE/delW
 
@@ -258,13 +319,12 @@ class NodeBase(ABC):
                 - params_grad: NodeParams containing weight and bias gradients
         """
         from fabricpc.nodes import get_node_class
+
         node_class = get_node_class(node_info.node_type)
 
         # Use JAX's value_and_grad to compute gradients w.r.t. params
         (total_energy, new_state), params_grad = jax.value_and_grad(
-            node_class.forward,
-            argnums=0,  # params
-            has_aux=True
+            node_class.forward, argnums=0, has_aux=True  # params
         )(params, inputs, state, node_info)
 
         return new_state, params_grad
@@ -272,10 +332,10 @@ class NodeBase(ABC):
     @staticmethod
     @abstractmethod
     def forward(
-            params: NodeParams,
-            inputs: Dict[str, jnp.ndarray],  # EdgeInfo.key -> inputs data
-            state: NodeState,  # state object for the present node
-            node_info: NodeInfo,
+        params: NodeParams,
+        inputs: Dict[str, jnp.ndarray],  # EdgeInfo.key -> inputs data
+        state: NodeState,  # state object for the present node
+        node_info: NodeInfo,
     ) -> tuple[jax.Array, NodeState]:
         """
         Forward pass through the node, returning energy scalar and updated state.
@@ -332,10 +392,7 @@ class NodeBase(ABC):
         """
 
     @staticmethod
-    def energy_functional(
-        state: NodeState,
-        node_info: NodeInfo
-    ) -> NodeState:
+    def energy_functional(state: NodeState, node_info: NodeInfo) -> NodeState:
         """
         Compute the energy and the derivative with respect to the node's latent state.
 
@@ -365,10 +422,14 @@ class NodeBase(ABC):
         # Get energy config from node_config (should be set during graph construction)
         energy_config = node_info.node_config.get("energy", None)
         if energy_config is None:
-            raise ValueError(f"graph was improperly constructed. Node {node_info.name} is missing default energy functional.")
+            raise ValueError(
+                f"graph was improperly constructed. Node {node_info.name} is missing default energy functional."
+            )
 
         # Compute energy and gradient using the energy registry
-        energy, grad = get_energy_and_gradient(state.z_latent, state.z_mu, energy_config)
+        energy, grad = get_energy_and_gradient(
+            state.z_latent, state.z_mu, energy_config
+        )
 
         # Accumulate gradient with existing latent_grad
         latent_grad = state.latent_grad + grad
@@ -394,6 +455,7 @@ class NodeBase(ABC):
             energy = energy_class.energy(z_latent, z_mu, config)
         """
         from fabricpc.core.energy import get_energy_class
+
         return get_energy_class(energy_name)
 
     @classmethod
@@ -455,9 +517,7 @@ class NodeBase(ABC):
 
     @classmethod
     def _build_slots(
-        cls,
-        node_name: str,
-        in_edges: Dict[str, EdgeInfo]
+        cls, node_name: str, in_edges: Dict[str, EdgeInfo]
     ) -> Dict[str, SlotInfo]:
         """
         Build SlotInfo objects from slot specs and incoming edges.
@@ -478,8 +538,7 @@ class NodeBase(ABC):
         for slot_name, slot_spec in slot_specs.items():
             # Find node names that are in-neighbors to this slot
             in_neighbors = [
-                edge.source for edge in in_edges.values()
-                if edge.slot == slot_name
+                edge.source for edge in in_edges.values() if edge.slot == slot_name
             ]
 
             # Validate constraints
@@ -493,7 +552,7 @@ class NodeBase(ABC):
                 name=slot_name,
                 parent_node=node_name,
                 is_multi_input=slot_spec.is_multi_input,
-                in_neighbors=tuple(in_neighbors)
+                in_neighbors=tuple(in_neighbors),
             )
 
         # Validate that all incoming edges connect to valid slots
@@ -547,7 +606,10 @@ class NodeBase(ABC):
         Returns:
             Validated activation config dict
         """
-        from fabricpc.core.activations import get_activation_class, validate_activation_config
+        from fabricpc.core.activations import (
+            get_activation_class,
+            validate_activation_config,
+        )
 
         act_config = node_config.get("activation")
 
@@ -572,7 +634,10 @@ class NodeBase(ABC):
         Returns:
             Validated state initialization config dict, or None if not specified
         """
-        from fabricpc.core.initializers import get_initializer_class, validate_initializer_config
+        from fabricpc.core.initializers import (
+            get_initializer_class,
+            validate_initializer_config,
+        )
 
         state_init_config = node_config.get("latent_init")
 

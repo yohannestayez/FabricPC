@@ -133,6 +133,8 @@ class LinearNode(FlattenInputMixin, NodeBase):
                 rand_key_w[edge_key], weight_shape, weight_init_config
             )
 
+        # TODO - consider initializing bias to small random values instead of zeros for better symmetry breaking?
+        # TODO - create bias vector for last dimension only and broadcast to (1,..., 1, out_features)
         # Initialize bias (usually zeros)
         # Bias shape is (1,) + node_shape for proper broadcasting
         use_bias = config.get("use_bias", True)
@@ -244,6 +246,7 @@ class LinearExplicitGrad(LinearNode):
         inputs: Dict[str, jnp.ndarray],  # EdgeInfo.key -> inputs data
         state: NodeState,  # state object for the present node
         node_info: NodeInfo,
+        is_clamped: bool,
     ) -> Tuple[NodeState, Dict[str, jnp.ndarray]]:
         """
         Forward pass: updates node state and computes gradients w.r.t. inputs.
