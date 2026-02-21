@@ -18,6 +18,7 @@ from fabricpc.core.types import NodeParams, NodeState, NodeInfo
 from fabricpc.core.initializers import initialize
 from fabricpc.core.positional import precompute_freqs_cis, apply_rotary_emb
 from fabricpc.core.activations import get_activation
+from fabricpc.utils.helpers import layernorm
 
 # ==============================================================================
 # EMBEDDING NODE
@@ -62,14 +63,9 @@ class EmbeddingNode(NodeBase):
         input_shapes: Dict[str, Tuple[int, ...]],
         config: Dict[str, Any],
     ) -> NodeParams:
-        vocab_size = config["vocab_size"]
-        embed_dim = config["embed_dim"]
-
-        # Initialize embedding matrix (vocab_size, embed_dim)
-        w_key, _ = jax.random.split(key)
         weights = {
             "embeddings": initialize(
-                w_key, (vocab_size, embed_dim), config.get("weight_init")
+                key, (config["vocab_size"], config["embed_dim"]), config["weight_init"]
             )
         }
         return NodeParams(weights=weights, biases={})
@@ -140,284 +136,119 @@ class EmbeddingNode(NodeBase):
 
 
 # ==============================================================================
-# TRANSFORMER BLOCK NODE
+# MULTI-HEAD ATTENTION + RESIDUAL NODE
 # ==============================================================================
 
 
-@register_node("transformer_block")
-class TransformerBlockNode(NodeBase):
+@register_node("mha_residual")
+class MhaResidualNode(NodeBase):
     """
-    Standard Transformer Block:
-    x + Attention(LN(x)) + MLP(LN(x))
-
-    Includes:
-    - Multi-Head Self Attention (with RoPE)
-    - Feed Forward Network (MLP)
-    - Pre-Norm architecture
+    Implements: x + Attention(LayerNorm(x))
     """
 
     CONFIG_SCHEMA = {
         "embed_dim": {"type": int, "required": True},
         "num_heads": {"type": int, "required": True},
-        "mlp_dim": {"type": int, "required": True},
-        "activation": {"type": str, "default": "gelu"},
         "use_rope": {"type": bool, "default": True},
-        "max_seq_len": {
-            "type": int,
-            "default": 1024,
-            "description": "For precomputing RoPE",
-        },
-        "dropout_rate": {"type": float, "default": 0.0},
-        "weight_init": {
-            "type": dict,
-            "default": {"type": "normal", "std": 0.02},
-            "description": "Initialization config for weights",
-        },
+        "rope_theta": {"type": float, "default": 10000.0},
+        "is_causal": {"type": bool, "default": True},
+        "weight_init": {"type": dict, "default": {"type": "xavier"}},
     }
+    DEFAULT_ENERGY_CONFIG = {"type": "gaussian"}
 
     @staticmethod
-    def get_slots() -> Dict[str, SlotSpec]:
-        return {"in": SlotSpec(name="in", is_multi_input=True)}
+    def get_slots():
+        return {"in": SlotSpec("in", False), "mask": SlotSpec("mask", False)}
 
     @staticmethod
-    def initialize_params(
-        key: jax.Array,
-        node_shape: Tuple[int, ...],
-        input_shapes: Dict[str, Tuple[int, ...]],
-        config: Dict[str, Any],
-    ) -> NodeParams:
-        embed_dim = config["embed_dim"]
-        num_heads = config["num_heads"]
-        mlp_dim = config["mlp_dim"]
-        head_dim = embed_dim // num_heads
+    def initialize_params(key, node_shape, input_shapes, config):
+        dim = config["embed_dim"]
+        keys = jax.random.split(key, 6)
 
-        keys = jax.random.split(key, 10)
+        # Use config provided weight_init
+        weight_init = config.get("weight_init", {"type": "xavier"})
 
-        # Initialize weights
-        weight_init = config.get("weight_init", {"type": "normal", "std": 0.02})
-
-        def init_w(k, shape):
-            return initialize(k, shape, weight_init)
+        def init_w(k, s):
+            return initialize(k, s, weight_init)
 
         weights = {
-            # Attention Projections
-            "attn_q": init_w(keys[0], (embed_dim, embed_dim)),
-            "attn_k": init_w(keys[1], (embed_dim, embed_dim)),
-            "attn_v": init_w(keys[2], (embed_dim, embed_dim)),
-            "attn_o": init_w(keys[3], (embed_dim, embed_dim)),
-            # MLP Projections
-            "mlp_in": init_w(keys[4], (embed_dim, mlp_dim)),
-            "mlp_out": init_w(keys[5], (mlp_dim, embed_dim)),
+            "ln_gamma": jnp.ones((dim,)),
+            "W_q": init_w(keys[0], (dim, dim)),
+            "W_k": init_w(keys[1], (dim, dim)),
+            "W_v": init_w(keys[2], (dim, dim)),
+            "W_o": init_w(keys[3], (dim, dim)),
         }
-
         biases = {
-            # Attention Biases
-            "attn_q": jnp.zeros((embed_dim,)),
-            "attn_k": jnp.zeros((embed_dim,)),
-            "attn_v": jnp.zeros((embed_dim,)),
-            "attn_o": jnp.zeros((embed_dim,)),
-            # MLP Biases
-            "mlp_in": jnp.zeros((mlp_dim,)),
-            "mlp_out": jnp.zeros((embed_dim,)),
-            # Layer Norms (Scale and Bias)
-            "ln1_scale": jnp.ones((embed_dim,)),
-            "ln1_bias": jnp.zeros((embed_dim,)),
-            "ln2_scale": jnp.ones((embed_dim,)),
-            "ln2_bias": jnp.zeros((embed_dim,)),
+            "ln_beta": jnp.zeros((dim,)),
+            "b_q": jnp.zeros((dim,)),
+            "b_k": jnp.zeros((dim,)),
+            "b_v": jnp.zeros((dim,)),
+            "b_o": jnp.zeros((dim,)),
         }
-
-        return NodeParams(weights=weights, biases=biases)
+        return NodeParams(weights, biases)
 
     @staticmethod
-    def forward(
-        params: NodeParams,
-        inputs: Dict[str, jnp.ndarray],
-        state: NodeState,
-        node_info: NodeInfo,
-    ) -> Tuple[jax.Array, NodeState]:
-        config = node_info.node_config
-        embed_dim = config["embed_dim"]
-        num_heads = config["num_heads"]
-        head_dim = embed_dim // num_heads
+    def forward(params, inputs, state, node_info):
+        x = inputs[next(k for k in inputs if k.endswith(":in"))]
+        mask_key = next((k for k in inputs if k.endswith(":mask")), None)
+        external_mask = inputs[mask_key] if mask_key else None
 
-        # Aggregate Inputs
-        x_in = jnp.zeros((state.z_latent.shape[0], *node_info.shape))
-        for x in inputs.values():
-            x_in = x_in + x
+        cfg = node_info.node_config
+        B, L, D = x.shape
+        num_heads = cfg["num_heads"]
+        head_dim = D // num_heads
 
-        batch_size, seq_len, _ = x_in.shape
-
-        # ----------------------------------------------------------------------
-        # Sub-Block 1: Attention
-        # ----------------------------------------------------------------------
-        # Layer Norm 1
-        mu = jnp.mean(x_in, axis=-1, keepdims=True)
-        sigma = jnp.std(x_in, axis=-1, keepdims=True)
-        ln1 = (x_in - mu) / (sigma + 1e-6)
-        ln1 = ln1 * params.biases["ln1_scale"] + params.biases["ln1_bias"]
+        # LayerNorm
+        x_norm = layernorm(x, params.weights["ln_gamma"], params.biases["ln_beta"])
 
         # Projections
-        wq = jnp.dot(ln1, params.weights["attn_q"]) + params.biases["attn_q"]
-        wk = jnp.dot(ln1, params.weights["attn_k"]) + params.biases["attn_k"]
-        wv = jnp.dot(ln1, params.weights["attn_v"]) + params.biases["attn_v"]
+        def proj(h, w_name, b_name):
+            return jnp.dot(h, params.weights[w_name]) + params.biases[b_name]
 
-        # Reshape to (batch, seq, num_heads, head_dim)
-        wq = wq.reshape(batch_size, seq_len, num_heads, head_dim)
-        wk = wk.reshape(batch_size, seq_len, num_heads, head_dim)
-        wv = wv.reshape(batch_size, seq_len, num_heads, head_dim)
+        Q = proj(x_norm, "W_q", "b_q").reshape(B, L, num_heads, head_dim)
+        K = proj(x_norm, "W_k", "b_k").reshape(B, L, num_heads, head_dim)
+        V = proj(x_norm, "W_v", "b_v").reshape(B, L, num_heads, head_dim)
 
         # RoPE
-        if config.get("use_rope", True):
-            freqs_cis = precompute_freqs_cis(head_dim, seq_len)
-            wq, wk = apply_rotary_emb(wq, wk, freqs_cis)
+        if cfg.get("use_rope"):
+            freqs_cis = precompute_freqs_cis(head_dim, L, theta=cfg["rope_theta"])
+            Q, K = apply_rotary_emb(Q, K, freqs_cis)
 
-        # Transpose (batch, seq, head, dim) to (batch, head, seq, dim)
-        wq = jnp.transpose(wq, (0, 2, 1, 3))
-        wk = jnp.transpose(wk, (0, 2, 1, 3))
-        wv = jnp.transpose(wv, (0, 2, 1, 3))
-
-        scores = jnp.matmul(wq, jnp.swapaxes(wk, -1, -2)) / jnp.sqrt(head_dim)
-
-        # Causal Mask
-        # Optimize: ensure mask is broadcastable and matches current seq_len
-        mask = jnp.tril(jnp.ones((seq_len, seq_len)))
-        scores = jnp.where(mask == 0, -1e9, scores)
-
-        attn_probs = nn.softmax(scores, axis=-1)
-        attn_out = jnp.matmul(attn_probs, wv)
-        attn_out = jnp.transpose(attn_out, (0, 2, 1, 3)).reshape(
-            batch_size, seq_len, embed_dim
+        # Attention
+        Q, K, V = (
+            Q.transpose(0, 2, 1, 3),
+            K.transpose(0, 2, 1, 3),
+            V.transpose(0, 2, 1, 3),
         )
-        attn_out = jnp.dot(attn_out, params.weights["attn_o"]) + params.biases["attn_o"]
+        scores = jnp.matmul(Q, K.swapaxes(-1, -2)) / jnp.sqrt(head_dim)
 
-        # Residual 1
-        h1 = x_in + attn_out
+        # Causal Masking
+        if cfg.get("is_causal", True):
+            causal_mask = jnp.tril(jnp.ones((L, L)))
+            scores = jnp.where(causal_mask == 0, -1e9, scores)
 
-        # ----------------------------------------------------------------------
-        # Sub-Block 2: MLP
-        # ----------------------------------------------------------------------
-        # Layer Norm 2
-        mu2 = jnp.mean(h1, axis=-1, keepdims=True)
-        sigma2 = jnp.std(h1, axis=-1, keepdims=True)
-        ln2 = (h1 - mu2) / (sigma2 + 1e-6)
-        ln2 = ln2 * params.biases["ln2_scale"] + params.biases["ln2_bias"]
+        if external_mask is not None:
+            scores = jnp.where(external_mask == 0, -1e9, scores)
 
-        # MLP
-        mlp_hidden = jnp.dot(ln2, params.weights["mlp_in"]) + params.biases["mlp_in"]
+        attn = nn.softmax(scores, axis=-1)
+        mha = jnp.matmul(attn, V).transpose(0, 2, 1, 3).reshape(B, L, D)
 
-        # Apply activation
-        activation_fn, _ = get_activation(node_info.node_config["activation"])
-        mlp_hidden = activation_fn(mlp_hidden)
-        mlp_out = (
-            jnp.dot(mlp_hidden, params.weights["mlp_out"]) + params.biases["mlp_out"]
-        )
+        # Output Projection
+        mha = proj(mha, "W_o", "b_o")
 
-        # Residual 2 (Prediction)
-        z_mu = h1 + mlp_out
-
-        # Error & State Update
+        # Residual
+        z_mu = x + mha
         error = state.z_latent - z_mu
 
-        # For complex nodes like this, we define gain_mod_error simply as error
-        # The backpropagation through the complex 'z_mu' function above handles
-        # the specific derivatives (attn, activations) via JAX autodiff
-        # in the forward_inference/forward_learning wrappers.
-        gain_mod_error = error
-
-        attn_substructure = {"attn_matrix": attn_probs, "Q": wq, "K": wk, "V": wv}
-
-        combined_substructure = {**attn_substructure, "gain_mod_error": gain_mod_error}
-
-        state = state._replace(
-            z_mu=z_mu, error=error, substructure=combined_substructure
-        )
-
-        state = TransformerBlockNode.energy_functional(state, node_info)
-        total_energy = jnp.sum(state.energy)
-
-        return total_energy, state
-
-
-# To build deep transformer PC graphs
-def create_deep_transformer(
-    depth: int,
-    embed_dim: int,
-    num_heads: int,
-    mlp_dim: int,
-    seq_len: int = 10,
-    vocab_size: int = None,
-    activation: str = "gelu",
-    weight_init: Dict[str, Any] = None,
-):
-    if weight_init is None:
-        weight_init = {"type": "normal", "std": 0.02}
-    nodes = []
-    edges = []
-
-    # Sensor Node (Holds the raw integer indices from the dataset.)
-    nodes.append(
-        {
-            "name": "input_ids",
-            "shape": (seq_len,),
-            "type": "linear",
-            "activation": {"type": "identity"},
+        # Store internals for gradient computation
+        substructure = {
+            "gain_mod_error": error,
+            "attn_matrix": attn,
+            "Q": Q,
+            "K": K,
+            "V": V,
         }
-    )
 
-    # Input Node
-    nodes.append(
-        {
-            "name": "input_embed",
-            "shape": (seq_len, embed_dim),
-            "type": "embedding",
-            "vocab_size": vocab_size,
-            "embed_dim": embed_dim,
-        }
-    )
-    edges.append(
-        {"source_name": "input_ids", "target_name": "input_embed", "slot": "in"}
-    )
-
-    # Stack Transformer Blocks
-    previous_node = "input_embed"
-
-    for i in range(depth):
-        block_name = f"block_{i}"
-
-        nodes.append(
-            {
-                "name": block_name,
-                "shape": (seq_len, embed_dim),
-                "type": "transformer_block",
-                "embed_dim": embed_dim,
-                "num_heads": num_heads,
-                "mlp_dim": mlp_dim,
-                "activation": activation,
-                "weight_init": weight_init,
-                "use_rope": True,
-            }
-        )
-
-        # Connect previous -> current
-        edges.append(
-            {"source_name": previous_node, "target_name": block_name, "slot": "in"}
-        )
-
-        previous_node = block_name
-
-    # Output Head
-    nodes.append(
-        {
-            "name": "logits",
-            "shape": (seq_len, vocab_size),
-            "type": "linear",
-            "activation": {"type": "identity"},
-        }
-    )
-    edges.append({"source_name": previous_node, "target_name": "logits", "slot": "in"})
-
-    return {
-        "node_list": nodes,
-        "edge_list": edges,
-        "task_map": {"x": "input_ids", "y": "logits"},
-    }
+        state = state._replace(z_mu=z_mu, error=error, substructure=substructure)
+        state = MhaResidualNode.energy_functional(state, node_info)
+        return jnp.sum(state.energy), state
