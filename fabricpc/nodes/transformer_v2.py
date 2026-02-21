@@ -7,7 +7,7 @@ This module implements:
 - Rotary Positional Embeddings (RoPE)
 """
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List, Optional
 import jax
 import jax.numpy as jnp
 from jax import nn
@@ -418,3 +418,128 @@ class VocabProjectionNode(NodeBase):
         )
         state = VocabProjectionNode.energy_functional(state, node_info)
         return jnp.sum(state.energy), state
+
+
+# ==============================================================================
+# MODEL BUILDER
+# ==============================================================================
+
+
+def create_deep_transformer(
+    depth: int,
+    embed_dim: int,
+    num_heads: int,
+    mlp_dim: int,
+    seq_len: int,
+    vocab_size: int,
+    activation: str = "gelu",
+    weight_init: Optional[Dict[str, Any]] = None,
+):
+    """
+    Creates a deep transformer graph using the sub-block architecture.
+    """
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, Any]] = []
+
+    if weight_init is None:
+        weight_init = {"type": "normal", "std": 0.02}
+
+    # Input Indices
+    nodes.append(
+        {
+            "name": "input_ids",
+            "shape": (seq_len,),
+            "type": "linear",
+            "activation": {"type": "identity"},
+        }
+    )
+
+    # Embedding
+    nodes.append(
+        {
+            "name": "embed",
+            "shape": (seq_len, embed_dim),
+            "type": "embedding",
+            "vocab_size": vocab_size,
+            "embed_dim": embed_dim,
+            "weight_init": weight_init,
+        }
+    )
+    edges.append({"source_name": "input_ids", "target_name": "embed", "slot": "in"})
+
+    previous_residual = "embed"
+
+    # Stack Layers
+    for i in range(depth):
+        # Attention
+        mha_name = f"L{i}_mha"
+        nodes.append(
+            {
+                "name": mha_name,
+                "shape": (seq_len, embed_dim),
+                "type": "mha_residual",
+                "embed_dim": embed_dim,
+                "num_heads": num_heads,
+                "use_rope": True,
+                "weight_init": weight_init,
+            }
+        )
+        edges.append(
+            {"source_name": previous_residual, "target_name": mha_name, "slot": "in"}
+        )
+
+        # LayerNorm + MLP1
+        mlp1_name = f"L{i}_mlp1"
+        nodes.append(
+            {
+                "name": mlp1_name,
+                "shape": (seq_len, mlp_dim),
+                "type": "ln_mlp1",
+                "embed_dim": embed_dim,
+                "ff_dim": mlp_dim,
+                "activation": activation,
+                "weight_init": weight_init,
+            }
+        )
+        edges.append({"source_name": mha_name, "target_name": mlp1_name, "slot": "in"})
+
+        # MLP2 + Residual
+        mlp2_name = f"L{i}_mlp2"
+        nodes.append(
+            {
+                "name": mlp2_name,
+                "shape": (seq_len, embed_dim),
+                "type": "mlp2_residual",
+                "embed_dim": embed_dim,
+                "ff_dim": mlp_dim,
+                "weight_init": weight_init,
+            }
+        )
+        edges.append({"source_name": mlp1_name, "target_name": mlp2_name, "slot": "in"})
+        edges.append(
+            {"source_name": mha_name, "target_name": mlp2_name, "slot": "residual"}
+        )
+
+        previous_residual = mlp2_name
+
+    # Vocab Projection
+    nodes.append(
+        {
+            "name": "logits",
+            "shape": (seq_len, vocab_size),
+            "type": "vocab_projection",
+            "vocab_size": vocab_size,
+            "embed_dim": embed_dim,
+            "weight_init": weight_init,
+        }
+    )
+    edges.append(
+        {"source_name": previous_residual, "target_name": "logits", "slot": "in"}
+    )
+
+    return {
+        "node_list": nodes,
+        "edge_list": edges,
+        "task_map": {"x": "input_ids", "y": "logits"},
+        "graph_state_initializer": {"type": "feedforward"},
+    }
