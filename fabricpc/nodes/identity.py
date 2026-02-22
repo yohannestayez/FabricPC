@@ -8,8 +8,6 @@ serve as conduits for data without learning.
 When multiple inputs are connected, they are summed together.
 """
 
-"""                                                                                                                                                                                                                                                                                             adding enough so as to invoke pre-commit checks which got skipped                                                                                                                                                                                                                               """
-
 from typing import Dict, Any, Tuple
 import jax
 import jax.numpy as jnp

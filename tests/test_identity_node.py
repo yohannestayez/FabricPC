@@ -14,10 +14,6 @@ This test suite verifies:
 6. Multi-dimensional input shapes
 """
 
-"""
-adding enough so as to invoke pre-commit checks which got skipped
-"""
-
 import os
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
