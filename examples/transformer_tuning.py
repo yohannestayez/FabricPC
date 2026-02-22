@@ -5,21 +5,16 @@ Hyperparameter Tuning for Transformer on Tiny Shakespeare (Multi-GPU Version)
 
 import os
 import jax
-import jax.numpy as jnp
 import torch
 import optuna
 import random
 from torch.utils.data import DataLoader, Dataset
-
 from fabricpc.graph import create_pc_graph
 from fabricpc.nodes.transformer_v2 import create_deep_transformer
 from fabricpc.training.multi_gpu import (
     train_pcn_multi_gpu,
     evaluate_transformer_multi_gpu,
 )
-
-from fabricpc.graph.state_initializer import initialize_graph_state
-from fabricpc.core.inference import run_inference
 
 from fabricpc.tuning.bayesian_tuner import BayesianTuner
 
@@ -82,7 +77,7 @@ def trial_model(config, rng_key):
     depth = config.get("depth", 1)
     seq_len = config.get("seq_len", 32)
     vocab_size = config.get("vocab_size", 65)
-    
+
     # Weight initialization config
     weight_init_std = config.get("weight_init_std", 0.02)
     weight_init = {"type": "normal", "std": weight_init_std}
@@ -119,11 +114,10 @@ def search_space_transformer(trial):
     mlp_dim = trial.suggest_categorical("mlp_dim", [64, 128])
     num_heads = trial.suggest_categorical("num_heads", [2, 4])
 
-    num_epochs = trial.suggest_int("num_epochs", 1, 3)  # Keep low for demo speed
     infer_steps = trial.suggest_int("infer_steps", 10, 30)
     eta_infer = trial.suggest_float("eta_infer", 0.01, 0.2)
     depth = trial.suggest_int("depth", 1, 12)
-    
+
     # Tuning weight initialization scale
     weight_init_std = trial.suggest_float("weight_init_std", 0.005, 0.05, log=True)
 
@@ -178,7 +172,7 @@ if __name__ == "__main__":
     N = len(data)
 
     print(f"Using all {N} characters ({100}%) of the dataset")
-    
+
     train_data, val_data = split_data(data)
 
     seq_len = 32
