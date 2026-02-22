@@ -1,13 +1,13 @@
 """
-MINIMAL Predictive Coding Network Example
+MNIST Demo with IdentityNode
 ================================================
 
-This is the absolute SIMPLEST example showing how to:
-1. Define a network with the new object API
-2. Train it on MNIST
-3. Get results
+This example demonstrates the IdentityNode, which passes input through
+unchanged with no learnable parameters. Useful for input nodes or
+passthrough connections.
 
-Total code: ~60 lines. That's it!
+Based on the minimal MNIST demo, with an IdentityNode added between
+hidden layers to demonstrate its usage.
 """
 
 import os  # Set environment variables before importing JAX
@@ -18,7 +18,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 import jax
-from fabricpc.nodes import Linear
+from fabricpc.nodes import Linear, IdentityNode
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params
 from fabricpc.core.activations import (
@@ -38,22 +38,24 @@ jax.config.update(
 )  # 'rbg' is faster than 'threefry2x32', but less reproducible across vmap
 
 # ==============================================================================
-# NETWORK DEFINITION: Object API
+# NETWORK DEFINITION: Object API with IdentityNode
 # ==============================================================================
 # fmt: off
 
-# Create nodes
+# Create nodes - including an IdentityNode as a passthrough layer
 pixels = Linear(shape=(784,), name="pixels")
 hidden1 = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1")
+passthrough = IdentityNode(shape=(256,), name="passthrough")  # Identity passthrough
 hidden2 = Linear(shape=(64,), activation=SigmoidActivation(), name="hidden2")
 output = Linear(shape=(10,), activation=SoftmaxActivation(), energy=CrossEntropyEnergy(), name="class")
 
 # Build graph structure
 structure = graph(
-    nodes=[pixels, hidden1, hidden2, output],
+    nodes=[pixels, hidden1, passthrough, hidden2, output],
     edges=[
         Edge(source=pixels, target=hidden1.slot("in")),
-        Edge(source=hidden1, target=hidden2.slot("in")),
+        Edge(source=hidden1, target=passthrough.slot("in")),
+        Edge(source=passthrough, target=hidden2.slot("in")),
         Edge(source=hidden2, target=output.slot("in")),
     ],
     task_map=TaskMap(x=pixels, y=output),
@@ -129,15 +131,11 @@ if __name__ == "__main__":
     print(f"Total parameters: {sum(p.size for p in jax.tree_util.tree_leaves(params))}")
 
     print("\n" + "=" * 70)
-    print("That's it! Want to change the architecture?")
-    print("Just modify the node and edge definitions above:")
-    print("  - Add more Linear nodes for deeper networks")
-    print("  - Change 'shape' values to make layers wider/narrower")
-    print("  - Modify edges to create different connection patterns")
-    print("  - No need to change any other code!")
-    print("\nJAX Benefits:")
-    print("  ✓ Automatic JIT compilation (10-20x speedup)")
-    print("  ✓ Functional programming (easier to debug)")
-    print("  ✓ Multi-GPU ready (just add pmap!)")
-    print("  ✓ TPU support out of the box")
+    print("This demo shows the IdentityNode in action!")
+    print("The 'passthrough' node has no learnable parameters -")
+    print("it simply passes data through unchanged.")
+    print("\nUseful for:")
+    print("  - Input nodes that don't need transformation")
+    print("  - Routing data through complex graph topologies")
+    print("  - Creating auxiliary connections without adding parameters")
     print("=" * 70)
