@@ -115,6 +115,47 @@ def compute_local_weight_gradients_ar(
     return GraphParams(nodes=gradients)
 
 
+def _build_autoregressive_clamps(
+    batch: Dict[str, jnp.ndarray],
+    structure: GraphStructure,
+    use_causal_mask: bool,
+) -> Dict[str, jnp.ndarray]:
+    """Build node clamps from task_map for autoregressive training."""
+    batch_size = batch["x"].shape[0]
+    seq_len = batch["x"].shape[1]
+
+    clamps: Dict[str, jnp.ndarray] = {}
+    for task_name, task_value in batch.items():
+        if task_name in structure.task_map:
+            node_name = structure.task_map[task_name]
+            clamps[node_name] = task_value
+
+    if use_causal_mask:
+        if "causal_mask" not in structure.task_map:
+            raise ValueError("Causal masking enabled but 'causal_mask' not in task_map")
+        # Create causal mask: (seq_len, seq_len) where mask[i,j] = 1 if j <= i
+        causal_mask = create_causal_mask(seq_len)
+        # Broadcast to (batch, 1, seq_len, seq_len) for attention scores
+        causal_mask = causal_mask[None, None, :, :]
+        causal_mask = jnp.broadcast_to(causal_mask, (batch_size, 1, seq_len, seq_len))
+        clamps[structure.task_map["causal_mask"]] = causal_mask
+
+    return clamps
+
+
+def _compute_average_energy(
+    final_state: GraphState,
+    structure: GraphStructure,
+    batch_size: int,
+) -> jnp.ndarray:
+    """Compute average energy over batch for non-source nodes."""
+    energy = jnp.array(0.0)
+    for node_name, node in structure.nodes.items():
+        if node.node_info.in_degree > 0:
+            energy = energy + jnp.sum(final_state.nodes[node_name].energy)
+    return energy / batch_size
+
+
 def train_step_autoregressive(
     params: GraphParams,
     opt_state: optax.OptState,
@@ -154,28 +195,7 @@ def train_step_autoregressive(
         Tuple of (updated_params, updated_opt_state, avg_energy, output_cross_entropy, final_state)
     """
     batch_size = batch["x"].shape[0]
-    seq_len = batch["x"].shape[1]
-
-    # Map tasks to nodes using task_map
-    clamps = {}
-    for task_name, task_value in batch.items():
-        if task_name in structure.task_map:
-            node_name = structure.task_map[task_name]
-            clamps[node_name] = task_value
-
-    # Generate and clamp causal mask if enabled and configured in task_map
-    if use_causal_mask:
-        if "causal_mask" not in structure.task_map:
-            raise ValueError("Causal masking enabled but 'causal_mask' not in task_map")
-        # Create causal mask: (seq_len, seq_len) where mask[i,j] = 1 if j <= i
-        causal_mask = create_causal_mask(seq_len)
-        # Broadcast to (batch, 1, seq_len, seq_len) for attention scores
-        causal_mask = causal_mask[None, None, :, :]
-        causal_mask = jnp.broadcast_to(causal_mask, (batch_size, 1, seq_len, seq_len))
-
-        # Clamp the causal mask to the node specified in task_map
-        mask_node = structure.task_map["causal_mask"]
-        clamps[mask_node] = causal_mask
+    clamps = _build_autoregressive_clamps(batch, structure, use_causal_mask)
 
     # Initialize state
     init_state = initialize_graph_state(
@@ -192,13 +212,7 @@ def train_step_autoregressive(
         params, init_state, clamps, structure, infer_steps, eta_infer
     )
 
-    # Compute total energy (sum over non-source nodes)
-    energy = jnp.array(0.0)
-    for node_name, node in structure.nodes.items():
-        if node.node_info.in_degree > 0:
-            energy = energy + jnp.sum(final_state.nodes[node_name].energy)
-
-    avg_energy = energy / batch_size
+    avg_energy = _compute_average_energy(final_state, structure, batch_size)
 
     # Compute local gradients
     grads = compute_local_weight_gradients_ar(params, final_state, structure)
@@ -221,6 +235,72 @@ def train_step_autoregressive(
     )
 
 
+def train_step_autoregressive_with_history(
+    params: GraphParams,
+    opt_state: optax.OptState,
+    batch: Dict[str, jnp.ndarray],
+    structure: GraphStructure,
+    optimizer: optax.GradientTransformation,
+    rng_key: jax.Array,
+    infer_steps: int,
+    eta_infer: float = 0.1,
+    use_causal_mask: bool = True,
+    collect_every: int = 1,
+) -> Tuple[
+    GraphParams,
+    optax.OptState,
+    float,
+    float,
+    GraphState,
+    Dict[str, Dict[str, jnp.ndarray]],
+]:
+    """
+    Single autoregressive training step with inference-history capture.
+
+    Returns:
+        Tuple of (updated_params, updated_opt_state, avg_energy, output_cross_entropy,
+        final_state, stacked_inference_history).
+    """
+    from fabricpc.utils.dashboarding.inference_tracking import (
+        run_inference_with_history,
+    )
+
+    batch_size = batch["x"].shape[0]
+    clamps = _build_autoregressive_clamps(batch, structure, use_causal_mask)
+
+    init_state = initialize_graph_state(
+        structure,
+        batch_size,
+        rng_key,
+        clamps=clamps,
+        state_init_config=structure.config["graph_state_initializer"],
+        params=params,
+    )
+
+    final_state, stacked_inference_history = run_inference_with_history(
+        params, init_state, clamps, structure, infer_steps, eta_infer, collect_every
+    )
+
+    avg_energy = _compute_average_energy(final_state, structure, batch_size)
+
+    grads = compute_local_weight_gradients_ar(params, final_state, structure)
+    updates, opt_state = optimizer.update(grads, opt_state, params)
+    params = cast(GraphParams, optax.apply_updates(params, updates))
+
+    output_cross_entropy = compute_loss(
+        final_state, batch["y"], structure.task_map["y"], loss_type="cross_entropy"
+    )
+
+    return (
+        params,
+        opt_state,
+        avg_energy.astype(float),
+        output_cross_entropy.astype(float),
+        final_state,
+        stacked_inference_history,
+    )
+
+
 def train_autoregressive(
     params: GraphParams,
     structure: GraphStructure,
@@ -230,6 +310,10 @@ def train_autoregressive(
     verbose: bool = True,
     epoch_callback: Optional[Callable] = None,
     iter_callback: Optional[Callable] = None,
+    debug_iter_callback: Optional[Callable] = None,
+    debug_collect_inference_history: bool = False,
+    debug_collect_every: int = 1,
+    debug_history_every_n_batches: int = 100,
 ) -> Tuple[GraphParams, List[List[float]], List[Any]]:
     """
     Main training loop for autoregressive predictive coding.
@@ -249,6 +333,12 @@ def train_autoregressive(
         verbose: Whether to print progress
         epoch_callback: Optional callback (epoch, params, structure, config, rng) -> any
         iter_callback: Optional callback (epoch, batch_idx, loss) -> any
+        debug_iter_callback: Optional callback:
+            (epoch_idx, batch_idx, energy, ce_loss, final_state, inference_history) -> any
+            where inference_history is None unless history collection is enabled.
+        debug_collect_inference_history: Whether to collect sampled inference histories.
+        debug_collect_every: Subsample stride for collected inference history steps.
+        debug_history_every_n_batches: Collect history every N batches when enabled.
 
     Returns:
         Tuple of (trained_params, energy_history, epoch_results)
@@ -265,6 +355,12 @@ def train_autoregressive(
     num_epochs = config.get("num_epochs", 10)
     use_causal_mask = config.get("use_causal_mask", True)
     grad_accum_steps = config.get("gradient_accumulation_steps", 1)
+    del grad_accum_steps  # Reserved for future use
+
+    if debug_collect_every < 1:
+        raise ValueError("debug_collect_every must be >= 1")
+    if debug_history_every_n_batches < 1:
+        raise ValueError("debug_history_every_n_batches must be >= 1")
 
     # JIT compile training step
     jit_train_step = jax.jit(
@@ -272,6 +368,22 @@ def train_autoregressive(
             p, o, b, structure, optimizer, k, infer_steps, eta_infer, use_causal_mask
         )
     )
+    jit_train_step_with_history = None
+    if debug_iter_callback is not None and debug_collect_inference_history:
+        jit_train_step_with_history = jax.jit(
+            lambda p, o, b, k: train_step_autoregressive_with_history(
+                p,
+                o,
+                b,
+                structure,
+                optimizer,
+                k,
+                infer_steps,
+                eta_infer,
+                use_causal_mask,
+                debug_collect_every,
+            )
+        )
 
     iter_results = []
     epoch_results = []
@@ -303,12 +415,48 @@ def train_autoregressive(
                 raise ValueError(f"Unsupported batch format: {type(batch_data)}")
 
             # Training step
-            params, opt_state, energy, ce_loss, _ = jit_train_step(
-                params, opt_state, batch, batch_keys[batch_idx]
+            collect_history_this_batch = (
+                debug_iter_callback is not None
+                and debug_collect_inference_history
+                and batch_idx % debug_history_every_n_batches == 0
             )
+
+            inference_history = None
+            if collect_history_this_batch:
+                (
+                    params,
+                    opt_state,
+                    energy,
+                    ce_loss,
+                    final_state,
+                    stacked_inference_history,
+                ) = jit_train_step_with_history(  # type: ignore[misc]
+                    params, opt_state, batch, batch_keys[batch_idx]
+                )
+                from fabricpc.utils.dashboarding.inference_tracking import (
+                    unstack_inference_history,
+                )
+
+                inference_history = unstack_inference_history(
+                    stacked_inference_history, collect_every=debug_collect_every
+                )
+            else:
+                params, opt_state, energy, ce_loss, final_state = jit_train_step(
+                    params, opt_state, batch, batch_keys[batch_idx]
+                )
 
             epoch_energy += energy
             epoch_ce_loss += ce_loss
+
+            if debug_iter_callback is not None:
+                debug_iter_callback(
+                    epoch_idx,
+                    batch_idx,
+                    energy,
+                    ce_loss,
+                    final_state,
+                    inference_history,
+                )
 
             if iter_callback is not None:
                 batch_energies.append(iter_callback(epoch_idx, batch_idx, energy))

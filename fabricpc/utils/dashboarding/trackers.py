@@ -166,12 +166,12 @@ class AimExperimentTracker:
             "task_map": structure.task_map,
             "nodes": {
                 name: {
-                    "shape": list(info.shape),
-                    "type": info.node_type,
-                    "in_degree": info.in_degree,
-                    "out_degree": info.out_degree,
+                    "shape": list(node.node_info.shape),
+                    "type": node.node_info.node_type,
+                    "in_degree": node.node_info.in_degree,
+                    "out_degree": node.node_info.out_degree,
                 }
-                for name, info in structure.nodes.items()
+                for name, node in structure.nodes.items()
             },
         }
 
@@ -230,7 +230,7 @@ class AimExperimentTracker:
 
         energies = extract_node_energies(state)
         for node_name, energy in energies.items():
-            if structure.nodes[node_name].in_degree > 0:
+            if structure.nodes[node_name].node_info.in_degree > 0:
                 mean_energy = float(np.mean(energy))
                 self._run.track(
                     mean_energy,
@@ -445,6 +445,79 @@ class AimExperimentTracker:
                         "batch": batch,
                     },
                 )
+
+    def track_inference_dynamics_from_history(
+        self,
+        inference_history: List[Dict[str, Dict[str, float]]],
+        epoch: int,
+        batch: int,
+        nodes: Optional[List[str]] = None,
+        collect_every: int = 1,
+    ) -> None:
+        """Track inference dynamics from lightweight history metrics.
+
+        Args:
+            inference_history: List of step metrics from
+                unstack_inference_history/run_inference_with_history.
+            epoch: Current epoch.
+            batch: Current batch index.
+            nodes: Optional nodes to track. Defaults to configured nodes, else all.
+            collect_every: Step stride used during history collection.
+        """
+        if not self.config.track_inference_dynamics:
+            return
+        if not self._ensure_initialized():
+            return
+        if collect_every < 1:
+            raise ValueError("collect_every must be >= 1")
+
+        nodes = nodes or self.config.inference_nodes_to_track
+        if not nodes and inference_history:
+            nodes = list(inference_history[0].keys())
+
+        for step_idx, step_metrics in enumerate(inference_history):
+            infer_step = step_idx * collect_every
+            for node_name in nodes:
+                if node_name not in step_metrics:
+                    continue
+
+                node_metrics = step_metrics[node_name]
+
+                if "energy" in node_metrics:
+                    self._run.track(
+                        float(node_metrics["energy"]),
+                        name="inference_energy",
+                        step=infer_step,
+                        context={
+                            "node": node_name,
+                            "epoch": epoch,
+                            "batch": batch,
+                        },
+                    )
+
+                if "latent_grad_norm" in node_metrics:
+                    self._run.track(
+                        float(node_metrics["latent_grad_norm"]),
+                        name="inference_grad_norm",
+                        step=infer_step,
+                        context={
+                            "node": node_name,
+                            "epoch": epoch,
+                            "batch": batch,
+                        },
+                    )
+
+                if "error_norm" in node_metrics:
+                    self._run.track(
+                        float(node_metrics["error_norm"]),
+                        name="inference_error_norm",
+                        step=infer_step,
+                        context={
+                            "node": node_name,
+                            "epoch": epoch,
+                            "batch": batch,
+                        },
+                    )
 
     def close(self) -> None:
         """Close the Aim run."""

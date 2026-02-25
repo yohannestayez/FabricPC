@@ -5,7 +5,8 @@ Transformer Predictive Coding Demo
 A quick experiment demonstrating transformer blocks with predictive coding versus backprop training
 on character-level language modeling using the TinyShakespeare dataset.
 
-Works in Backprop mode out of the box, but predictive coding training is not yet tuned - treat this as a starting point for experimentation!
+Predictive coding mode is enabled by default to expose full AIM tracking diagnostics.
+PC training is still not fully tuned - treat this as a starting point for experimentation.
 
 This demo:
 1. Downloads TinyShakespeare (~1MB of text)
@@ -16,7 +17,14 @@ This demo:
 Expected runtime: ~5-20 minutes on a consumer GPU (RTX 3080/4080 class)
 """
 
-use_pcn = False  # Set to True to use predictive coding training, False for backprop
+use_pcn = True  # Set to True to use predictive coding training, False for
+# backprop
+ENABLE_AIM_TRACKING = True  # Tracking is enabled by default when Aim is available
+
+AIM_WEIGHT_EVERY_N_EPOCHS = 1
+AIM_LATENT_EVERY_N_BATCHES = 50
+AIM_INFER_DYNAMICS_EVERY_N_BATCHES = 100
+AIM_INFER_COLLECT_EVERY = 5
 
 import os
 
@@ -49,6 +57,11 @@ from fabricpc.training.train_autoregressive import (
 from fabricpc.training.train_backprop import (
     train_backprop_autoregressive,
     evaluate_backprop_autoregressive,
+)
+from fabricpc.utils.dashboarding import (
+    AimExperimentTracker,
+    TrackingConfig,
+    is_aim_available,
 )
 
 # Reproducibility
@@ -484,8 +497,81 @@ def main():
         "optimizer": {"type": "adam", "lr": LR, "weight_decay": 0.001},
         "use_causal_mask": True,  # Enable causal masking for autoregressive
     }
+    tracked_pc_nodes = [
+        node_name
+        for node_name, node in structure.nodes.items()
+        if node.node_info.in_degree > 0
+    ]
+
+    # Setup Aim tracking (default ON, graceful fallback if Aim is unavailable)
+    tracker = None
+    tracking_enabled = False
+    tracking_config = None
+    if ENABLE_AIM_TRACKING:
+        if is_aim_available():
+            tracking_enabled = True
+            tracking_config = TrackingConfig(
+                experiment_name="transformer_autoregressive_tracking",
+                run_name=(
+                    f"{'pc' if use_pcn else 'backprop'}_"
+                    f"epochs{NUM_EPOCHS}_lr{LR}_infer{INFER_STEPS}"
+                ),
+                # Batch-level tracking
+                track_batch_energy=True,
+                track_batch_energy_per_node=True,
+                # Epoch-level tracking
+                track_epoch_energy=True,
+                track_epoch_accuracy=True,
+                track_weight_distributions=True,
+                track_latent_distributions=True,
+                track_preactivation_distributions=True,
+                track_activation_distributions=True,
+                # Inference dynamics
+                track_inference_dynamics=True,
+                inference_nodes_to_track=tracked_pc_nodes,
+                # Frequency controls
+                weight_distribution_every_n_epochs=AIM_WEIGHT_EVERY_N_EPOCHS,
+                latent_distribution_every_n_batches=AIM_LATENT_EVERY_N_BATCHES,
+            )
+            tracker = AimExperimentTracker(config=tracking_config)
+            tracker.log_hyperparams(
+                {
+                    "model": {
+                        "seq_len": SEQ_LEN,
+                        "embed_dim": EMBED_DIM,
+                        "num_heads": NUM_HEADS,
+                        "num_blocks": NUM_BLOCKS,
+                        "ff_dim": FF_DIM,
+                        "rope_theta": ROPE_THETA,
+                        "vocab_size": train_dataset.vocab_size,
+                    },
+                    "training": {
+                        "mode": "pc" if use_pcn else "backprop",
+                        "num_epochs": NUM_EPOCHS,
+                        "batch_size": BATCH_SIZE,
+                        "optimizer": train_config["optimizer"],
+                        "infer_steps": INFER_STEPS,
+                        "eta_infer": ETA_INFER,
+                        "use_causal_mask": train_config["use_causal_mask"],
+                    },
+                    "tracking": {
+                        "latent_every_n_batches": AIM_LATENT_EVERY_N_BATCHES,
+                        "infer_dynamics_every_n_batches": AIM_INFER_DYNAMICS_EVERY_N_BATCHES,
+                        "infer_collect_every": AIM_INFER_COLLECT_EVERY,
+                    },
+                }
+            )
+            tracker.log_graph_structure(structure)
+            print("\n[Aim Tracking] Enabled (default)")
+        else:
+            tqdm.write(
+                "[Aim Tracking] Aim is not installed. Continuing without tracking."
+            )
 
     # Create evaluation callback for test set
+    train_energy_totals: Dict[int, float] = {}
+    train_energy_counts: Dict[int, int] = {}
+
     def create_eval_callback(use_pc: bool):
         """Create appropriate eval callback based on training method."""
         if use_pc:
@@ -507,6 +593,19 @@ def main():
                 tqdm.write(
                     f"  Test - Loss: {metrics['loss']:.4f}, Perplexity: {metrics['perplexity']:.2f}, Acc: {metrics['accuracy']:.4f}"
                 )
+                if tracker is not None:
+                    train_count = train_energy_counts.get(epoch_idx, 0)
+                    if train_count > 0:
+                        avg_train_energy = train_energy_totals[epoch_idx] / train_count
+                        tracker.track_epoch_metrics(
+                            {"energy": avg_train_energy},
+                            epoch=epoch_idx,
+                            subset="train",
+                        )
+                    tracker.track_epoch_metrics(metrics, epoch=epoch_idx, subset="val")
+                    tracker.track_weight_distributions(
+                        params, structure, epoch=epoch_idx
+                    )
                 return metrics
 
         else:
@@ -525,6 +624,11 @@ def main():
                 tqdm.write(
                     f"  Test - Loss: {metrics['loss']:.4f}, Perplexity: {metrics['perplexity']:.2f}, Acc: {metrics['accuracy']:.4f}"
                 )
+                if tracker is not None:
+                    tracker.track_epoch_metrics(metrics, epoch=epoch_idx, subset="val")
+                    tracker.track_weight_distributions(
+                        params, structure, epoch=epoch_idx
+                    )
                 return metrics
 
         return eval_callback
@@ -558,6 +662,49 @@ def main():
 
     iter_callback = create_iter_callback(use_pcn)
 
+    def create_debug_iter_callback(use_pc: bool):
+        if not use_pc or tracker is None:
+            return None
+
+        def debug_iter_callback(
+            epoch_idx: int,
+            batch_idx: int,
+            energy: float,
+            ce_loss: float,
+            final_state: Any,
+            inference_history: Optional[List[Dict[str, Dict[str, float]]]],
+        ):
+            del ce_loss
+            energy_value = float(energy)
+            train_energy_totals[epoch_idx] = (
+                train_energy_totals.get(epoch_idx, 0.0) + energy_value
+            )
+            train_energy_counts[epoch_idx] = train_energy_counts.get(epoch_idx, 0) + 1
+
+            tracker.track_batch_energy(energy_value, epoch=epoch_idx, batch=batch_idx)
+            tracker.track_batch_energy_per_node(
+                final_state, structure, epoch=epoch_idx, batch=batch_idx
+            )
+            tracker.track_latent_distributions(
+                final_state,
+                epoch=epoch_idx,
+                batch=batch_idx,
+                nodes=tracked_pc_nodes,
+            )
+
+            if inference_history is not None and tracking_config is not None:
+                tracker.track_inference_dynamics_from_history(
+                    inference_history,
+                    epoch=epoch_idx,
+                    batch=batch_idx,
+                    nodes=tracking_config.inference_nodes_to_track,
+                    collect_every=AIM_INFER_COLLECT_EVERY,
+                )
+
+        return debug_iter_callback
+
+    debug_iter_callback = create_debug_iter_callback(use_pcn)
+
     # Train using autoregressive trainer
     print(
         "\n[3/5] Training with autoregressive trainer (JIT compilation on first batch)..."
@@ -582,6 +729,12 @@ def main():
                 verbose=True,
                 epoch_callback=eval_callback,
                 iter_callback=iter_callback,
+                debug_iter_callback=debug_iter_callback,
+                debug_collect_inference_history=(
+                    tracking_enabled and use_pcn and tracking_config is not None
+                ),
+                debug_collect_every=AIM_INFER_COLLECT_EVERY,
+                debug_history_every_n_batches=AIM_INFER_DYNAMICS_EVERY_N_BATCHES,
             )
         else:
             # Backprop (autoregressive)
@@ -603,6 +756,8 @@ def main():
             )
     finally:
         progress_bar.close()
+        if tracker is not None:
+            tracker.close()
 
     train_time = time.time() - start_time
 
