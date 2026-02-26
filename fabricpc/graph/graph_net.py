@@ -74,7 +74,6 @@ def compute_local_weight_gradients(
     return params_gradients
 
 
-# TODO create abstraction and config schema for param initialization, similar to graph state initialization
 def initialize_params(
     structure: GraphStructure,
     rng_key: jax.Array,  # from jax.random.PRNGKey

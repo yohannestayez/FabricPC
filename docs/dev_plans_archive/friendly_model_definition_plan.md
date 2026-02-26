@@ -497,8 +497,9 @@ structure = graph(
 params = initialize_params(structure, rng_key)
 
 Revisions to the refactorization:
-Removed get_activation, get_activation_fn, and get_activation_deriv from the codebase. Changes:
-- fabricpc/core/activations.py — Deleted the 3 functions and the "Convenience Functions" section. Removed unused Callable/Tuple imports.
-- fabricpc/core/__init__.py — Removed from import and __all__.
-- fabricpc/nodes/linear.py:325 — compute_gain_mod_error now calls type(activation).derivative(x, activation.config) directly.
-- fabricpc/nodes/transformer.py:217 — FFN activation now calls type(internal_activation).forward(x, internal_activation.config) directly.
+  Removed get_activation, get_activation_fn, and get_activation_deriv from the codebase. Changes:
+  - fabricpc/core/activations.py — Deleted the 3 functions and the "Convenience Functions" section. Removed unused Callable/Tuple imports.
+  - fabricpc/core/__init__.py — Removed from import and __all__.
+  - fabricpc/nodes/linear.py:325 — compute_gain_mod_error now calls type(activation).derivative(x, activation.config) directly.
+  - fabricpc/nodes/transformer.py:217 — FFN activation now calls type(internal_activation).forward(x, internal_activation.config) directly.
+  Removed class registries entirely

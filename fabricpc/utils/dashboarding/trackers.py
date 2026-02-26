@@ -4,7 +4,6 @@ This module provides the main tracking interface for experiment monitoring
 with Aim. All tracking is designed to be optional and lazy-loaded.
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -111,6 +110,10 @@ class AimExperimentTracker:
 
         Returns:
             True if Aim is available and initialized, False otherwise.
+
+        Raises:
+            Any exception from Aim initialization that is not a connection
+            or import error (those are warned and suppressed).
         """
         if self._initialized:
             return self._run is not None
@@ -118,6 +121,9 @@ class AimExperimentTracker:
         self._initialized = True
         if not is_aim_available():
             self._run = None
+            print(
+                "WARNING: Aim is not installed. Tracking disabled. Install with: pip install aim"
+            )
             return False
 
         try:
@@ -130,9 +136,9 @@ class AimExperimentTracker:
                 if self.config.run_name:
                     self._run.name = self.config.run_name
             return True
-        except Exception:
+        except (ConnectionError, OSError, TimeoutError) as e:
             self._run = None
-            logging.getLogger(__name__).warning("Failed to initialize Aim Run.")
+            print(f"WARNING: Failed to connect to Aim server: {e}. Tracking disabled.")
             return False
 
     @property
@@ -166,12 +172,12 @@ class AimExperimentTracker:
             "task_map": structure.task_map,
             "nodes": {
                 name: {
-                    "shape": list(info.shape),
-                    "type": info.node_type,
-                    "in_degree": info.in_degree,
-                    "out_degree": info.out_degree,
+                    "shape": list(node.node_info.shape),
+                    "type": node.node_info.node_type,
+                    "in_degree": node.node_info.in_degree,
+                    "out_degree": node.node_info.out_degree,
                 }
-                for name, info in structure.nodes.items()
+                for name, node in structure.nodes.items()
             },
         }
 
@@ -230,7 +236,7 @@ class AimExperimentTracker:
 
         energies = extract_node_energies(state)
         for node_name, energy in energies.items():
-            if structure.nodes[node_name].in_degree > 0:
+            if structure.nodes[node_name].node_info.in_degree > 0:
                 mean_energy = float(np.mean(energy))
                 self._run.track(
                     mean_energy,

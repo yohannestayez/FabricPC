@@ -1,9 +1,13 @@
 # Changelog
 
+## [0.2.8] - 2026-02-25
+- Refactored model definition to be object based rather than purely config based. Existing model configs can be easily adapted to new format. See examples folder.
+- Removed registry pattern for nodes, energy functionals, and other components in favor of explicit imports and class constructors.
+
 ## [0.2.7] - 2026-02-18
-Add JAX-compatible MNIST data loader. Removed pytorch dependency from project.
-Enhanced documentation and comments across multiple files for clarity. Refactored inference to ignore energy of nodes that do not have energy (e.g. terminal input nodes).
-Added Aim integration for comprehensive experiment tracking and visualization. docs/user_guides/aim_tensorboard_guide.md provides instructions for setting up Aim and using it with FabricPC.
+- Add JAX-compatible MNIST data loader. Removed pytorch dependency from project.
+- Enhanced documentation and comments across multiple files for clarity. Refactored inference to ignore energy of nodes that do not have energy (e.g. terminal input nodes).
+- Added Aim integration for comprehensive experiment tracking and visualization. docs/user_guides/aim_tensorboard_guide.md provides instructions for setting up Aim and using it with FabricPC.
 
 ## [0.2.6] - 2026-01-06
 - Fixed multi-GPU training to correctly use graph state initializer from GraphStructure config.

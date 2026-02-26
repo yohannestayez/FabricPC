@@ -27,6 +27,8 @@ There are various flavors of PC. FabricPC provides a graph-based implementation 
 - Extensibility for research
  
 ## Quick Start
+
+Create a virtual environement with python 3.12.x (higher versions may not work with Aim experiment tracking)
 ```bash
 # Install in editable mode (recommended for development, and running examples)
 pip install -e ".[dev,tfds,viz]"

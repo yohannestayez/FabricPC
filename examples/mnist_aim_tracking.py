@@ -40,8 +40,12 @@ from fabricpc.utils.data.dataloader import MnistLoader
 from fabricpc.nodes import Linear
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params
-from fabricpc.core.activations import IdentityActivation, SigmoidActivation
-from fabricpc.core.energy import GaussianEnergy
+from fabricpc.core.activations import (
+    IdentityActivation,
+    SigmoidActivation,
+    SoftmaxActivation,
+)
+from fabricpc.core.energy import GaussianEnergy, CrossEntropyEnergy
 from fabricpc.core.initializers import NormalInitializer
 from fabricpc.training import create_optimizer, evaluate_pcn
 
@@ -97,8 +101,8 @@ h3 = Linear(
 )
 class_node = Linear(
     shape=(10,),
-    activation=SigmoidActivation(),
-    energy=GaussianEnergy(precision=1.0),
+    activation=SoftmaxActivation(),
+    energy=CrossEntropyEnergy(),
     weight_init=NormalInitializer(mean=0.0, std=0.05),
     name="class",
 )
@@ -193,8 +197,8 @@ if TRACKING_ENABLED:
                 "layer_sizes": [
                     structure.nodes[n].node_info.shape for n in structure.node_order
                 ],
-                "activation": "sigmoid",
-                "energy_type": "gaussian",
+                "activation": "sigmoid/softmax",
+                "energy_type": "gaussian/cross_entropy",
             },
             "train_config": train_config,
             "batch_size": batch_size,

@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fabricpc"
-version = "0.2.7"
+version = "0.2.8"
 description = "A flexible, performant predictive coding library using JAX"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 authors = [
     {name = "FabricPC Authors"}
 ]

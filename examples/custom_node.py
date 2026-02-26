@@ -26,7 +26,12 @@ import jax.numpy as jnp
 from fabricpc.utils.data.dataloader import MnistLoader
 
 from fabricpc.nodes import Linear
-from fabricpc.nodes.base import NodeBase, SlotSpec, _register_node_class
+from fabricpc.nodes.base import (
+    NodeBase,
+    SlotSpec,
+    _register_node_class,
+    _get_node_class_from_info,
+)
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params
 from fabricpc.core.activations import (
@@ -101,8 +106,9 @@ class Conv2DNode(NodeBase):
         out_channels = node_shape[-1]  # Last dim is channels (NHWC)
 
         # Get weight initialization config
-        default_cfg = {"type": "normal", "mean": 0.0, "std": 0.05}
-        weight_init_config = config.get("weight_init", default_cfg)
+        weight_init = config.get("weight_init", None)
+        if weight_init is None:
+            weight_init = NormalInitializer(mean=0.0, std=0.05)
 
         weights_dict = {}
         keys = jax.random.split(key, len(input_shapes) + 1)
@@ -118,7 +124,7 @@ class Conv2DNode(NodeBase):
             )
 
             weights_dict[edge_key] = initialize(
-                keys[i], kernel_param_shape, weight_init_config
+                keys[i], kernel_param_shape, weight_init
             )
 
         # Initialize bias
@@ -189,6 +195,7 @@ class Conv2DNode(NodeBase):
         )
 
         # Compute energy
+        node_class = _get_node_class_from_info(node_info)
         state = node_class.energy_functional(state, node_info)
         total_energy = jnp.sum(state.energy)
 
@@ -276,8 +283,10 @@ def main():
     params = initialize_params(structure, graph_key)
 
     print(f"Model created: {len(structure.nodes)} nodes, {len(structure.edges)} edges")
-    for name, node_info in structure.nodes.items():
-        print(f"  {name}: shape={node_info.shape}, type={node_info.node_type}")
+    for name, node in structure.nodes.items():
+        print(
+            f"  {name}: shape={node.node_info.shape}, type={node.node_info.node_type}"
+        )
 
     total_params = sum(p.size for p in jax.tree_util.tree_leaves(params))
     print(f"Total parameters: {total_params:,}")

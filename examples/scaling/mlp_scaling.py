@@ -69,8 +69,15 @@ jax.config.update("jax_default_prng_impl", "threefry2x32")
 # =============================================================================
 
 # Model configurations to sweep
-MLP_WIDTHS = [128, 256, 512, 1024, 2048, 4096]  # hidden layer widths
-MLP_DEPTHS = [4, 8, 16, 32, 64, 128]  # number of layers after input
+MLP_WIDTHS = [
+    128,
+    256,
+]  # 512, 1024, 2048, 4096]  # hidden layer widths
+MLP_DEPTHS = [
+    4,
+    8,
+    16,
+]  # 32, 64, 128]  # number of layers after input
 
 # Fixed parameters
 BATCH_SIZE = 256

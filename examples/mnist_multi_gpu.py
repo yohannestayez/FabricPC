@@ -28,7 +28,12 @@ import time
 from fabricpc.nodes import Linear
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params
-from fabricpc.core.activations import IdentityActivation, SigmoidActivation
+from fabricpc.core.activations import (
+    IdentityActivation,
+    SigmoidActivation,
+    SoftmaxActivation,
+)
+from fabricpc.core.energy import CrossEntropyEnergy
 from fabricpc.training import train_pcn_multi_gpu, evaluate_pcn_multi_gpu
 from fabricpc.utils.data.dataloader import MnistLoader
 
@@ -44,7 +49,8 @@ graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
 pixels = Linear(shape=(784,), activation=IdentityActivation(), name="pixels")
 hidden1 = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1")
 hidden2 = Linear(shape=(64,), activation=SigmoidActivation(), name="hidden2")
-class_node = Linear(shape=(10,), activation=SigmoidActivation(), name="class")
+class_node = Linear(shape=(10,), activation=SoftmaxActivation(), energy=CrossEntropyEnergy(), name="class")
+
 
 structure = graph(
     nodes=[pixels, hidden1, hidden2, class_node],
