@@ -156,37 +156,31 @@ class Conv2DNode(NodeBase):
         batch_size = state.z_latent.shape[0]
         out_shape = node_info.shape
 
-        if node_info.in_degree == 0:
-            # Source node
-            z_mu = state.z_latent
-            pre_activation = jnp.zeros_like(state.z_latent)
-            error = jnp.zeros_like(state.z_latent)
-        else:
-            # Accumulate convolution outputs from all inputs
-            pre_activation = jnp.zeros((batch_size, *out_shape))
+        # Accumulate convolution outputs from all inputs
+        pre_activation = jnp.zeros((batch_size, *out_shape))
 
-            for edge_key, x in inputs.items():
-                kernel = params.weights[edge_key]
-                # Use JAX's lax.conv_general_dilated for the convolution
-                conv_out = jax.lax.conv_general_dilated(
-                    x,  # input: NHWC
-                    kernel,  # kernel: HWIO
-                    window_strides=stride,
-                    padding=padding,
-                    dimension_numbers=("NHWC", "HWIO", "NHWC"),
-                )
-                pre_activation = pre_activation + conv_out
+        for edge_key, x in inputs.items():
+            kernel = params.weights[edge_key]
+            # Use JAX's lax.conv_general_dilated for the convolution
+            conv_out = jax.lax.conv_general_dilated(
+                x,  # input: NHWC
+                kernel,  # kernel: HWIO
+                window_strides=stride,
+                padding=padding,
+                dimension_numbers=("NHWC", "HWIO", "NHWC"),
+            )
+            pre_activation = pre_activation + conv_out
 
-            # Add bias if present
-            if "b" in params.biases and params.biases["b"].size > 0:
-                pre_activation = pre_activation + params.biases["b"]
+        # Add bias if present
+        if "b" in params.biases and params.biases["b"].size > 0:
+            pre_activation = pre_activation + params.biases["b"]
 
-            # Apply activation
-            activation = node_info.activation  # ActivationBase instance
-            z_mu = type(activation).forward(pre_activation, activation.config)
+        # Apply activation
+        activation = node_info.activation  # ActivationBase instance
+        z_mu = type(activation).forward(pre_activation, activation.config)
 
-            # Compute error
-            error = state.z_latent - z_mu
+        # Compute error
+        error = state.z_latent - z_mu
 
         # Update state
         state = state._replace(

@@ -187,38 +187,33 @@ class LinearNode(FlattenInputMixin, NodeBase):
         out_shape = node_info.shape
         flatten_input = node_info.node_config.get("flatten_input", False)
 
-        if node_info.in_degree == 0:
-            z_mu = state.z_latent
-            pre_activation = jnp.zeros_like(state.z_latent)
-            error = jnp.zeros_like(state.z_latent)
+        if flatten_input:
+            # Dense/fully-connected: flatten all dimensions
+            pre_activation = FlattenInputMixin.compute_linear(
+                inputs, params.weights, batch_size, out_shape
+            )
         else:
-            if flatten_input:
-                # Dense/fully-connected: flatten all dimensions
-                pre_activation = FlattenInputMixin.compute_linear(
-                    inputs, params.weights, batch_size, out_shape
+            # Per-position: matmul on last axis only (standard for embeddings)
+            # Input shape: (batch, ..., in_features)
+            # Weight shape: (in_features, out_features)
+            # Output shape: (batch, ..., out_features)
+            pre_activation = jnp.zeros((batch_size,) + out_shape)
+            for edge_key, x in inputs.items():
+                # jnp.matmul broadcasts over leading dimensions
+                pre_activation = pre_activation + jnp.matmul(
+                    x, params.weights[edge_key]
                 )
-            else:
-                # Per-position: matmul on last axis only (standard for embeddings)
-                # Input shape: (batch, ..., in_features)
-                # Weight shape: (in_features, out_features)
-                # Output shape: (batch, ..., out_features)
-                pre_activation = jnp.zeros((batch_size,) + out_shape)
-                for edge_key, x in inputs.items():
-                    # jnp.matmul broadcasts over leading dimensions
-                    pre_activation = pre_activation + jnp.matmul(
-                        x, params.weights[edge_key]
-                    )
 
-            # Add bias if present
-            if "b" in params.biases and params.biases["b"].size > 0:
-                pre_activation = pre_activation + params.biases["b"]
+        # Add bias if present
+        if "b" in params.biases and params.biases["b"].size > 0:
+            pre_activation = pre_activation + params.biases["b"]
 
-            # Apply activation function from node_info
-            activation = node_info.activation
-            z_mu = type(activation).forward(pre_activation, activation.config)
+        # Apply activation function from node_info
+        activation = node_info.activation
+        z_mu = type(activation).forward(pre_activation, activation.config)
 
-            # Error
-            error = state.z_latent - z_mu
+        # Error
+        error = state.z_latent - z_mu
 
         # Update node state
         state = state._replace(pre_activation=pre_activation, z_mu=z_mu, error=error)
