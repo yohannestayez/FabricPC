@@ -23,15 +23,14 @@ import os
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_PLATFORMS", "cuda")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
+import jax
+import numpy as np
+from scipy import stats
 import argparse
 import importlib.util
-import sys
 import time
-
-import numpy as np
-import jax
-from scipy import stats
 
 from fabricpc.nodes import Linear
 from fabricpc.builder import Edge, TaskMap, graph

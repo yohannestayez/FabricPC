@@ -15,13 +15,13 @@ import os  # Set environment variables before importing JAX
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_PLATFORMS", "cuda")  # "cpu", "cuda" or "tpu"
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 import jax
 from fabricpc.nodes import Linear
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params
 from fabricpc.core.activations import (
-    IdentityActivation,
     SigmoidActivation,
     SoftmaxActivation,
 )
@@ -43,7 +43,7 @@ jax.config.update(
 # fmt: off
 
 # Create nodes
-pixels = Linear(shape=(784,), name="pixels")  # defaults: IdentityActivation, GaussianEnergy
+pixels = Linear(shape=(784,), name="pixels")
 hidden1 = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1")
 hidden2 = Linear(shape=(64,), activation=SigmoidActivation(), name="hidden2")
 output = Linear(shape=(10,), activation=SoftmaxActivation(), energy=CrossEntropyEnergy(), name="class")

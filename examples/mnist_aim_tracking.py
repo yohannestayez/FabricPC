@@ -30,6 +30,7 @@ os.environ.setdefault(
     "JAX_PLATFORMS", "cuda"
 )  # options: "cpu", "cuda" or "tpu" if available
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # Suppress XLA warnings
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 import time
 

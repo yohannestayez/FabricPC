@@ -41,6 +41,7 @@ import os
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_PLATFORMS", "cuda")
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
 import jax
 import jax.numpy as jnp
