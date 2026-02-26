@@ -182,8 +182,6 @@ custom_act = "my_package.activations:CustomActivation"
  - 2D Conv: shape=(H, W, C) - e.g., (28, 28, 64) for 28x28 image, 64 channels (NHWC)
  - 3D Conv: shape=(D, H, W, C) - e.g., (32, 32, 32, 16) for 3D volume
 
-Linear nodes flatten their inputs for transformation and then reshape their outputs to the specified shape.
-
 Conv Node Shape Flow (Future Reference)
 
  - Input:  (batch, H_in, W_in, C_in)   e.g., (32, 28, 28, 1)

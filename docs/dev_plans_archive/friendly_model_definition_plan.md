@@ -176,7 +176,7 @@ class NodeBase(ABC):
 **Add `__init__`**:
 ```python
 @register_node("linear")  # decorator can stay temporarily or be removed
-class LinearNode(FlattenInputMixin, NodeBase):
+class Linear(FlattenInputMixin, NodeBase):
     def __init__(self, shape, name, activation=None, energy=None,
                  use_bias=True, flatten_input=False, weight_init=None, latent_init=None):
         super().__init__(shape=shape, name=name, activation=activation, energy=energy,
@@ -204,8 +204,8 @@ If `@register_node` is kept temporarily for the transition, it just sets `cls._r
 
 Change from registry-based exports to direct class imports:
 ```python
-from fabricpc.nodes.linear import LinearNode as Linear
-from fabricpc.nodes.transformer import TransformerBlockNode as TransformerBlock
+from fabricpc.nodes.linear import Linear as Linear
+from fabricpc.nodes.transformer import TransformerBlock as TransformerBlock
 from fabricpc.nodes.identity import IdentityNode as Identity
 ```
 

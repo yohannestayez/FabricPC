@@ -3,7 +3,7 @@ Node types for JAX predictive coding networks.
 
 This module provides:
 - NodeBase: Abstract base class for all node types
-- Built-in node implementations (LinearNode, TransformerBlockNode)
+- Built-in node implementations (Linear, TransformerBlock)
 - Direct class imports for object-based graph construction
 """
 
@@ -17,12 +17,12 @@ from fabricpc.nodes.base import (
 )
 
 # Import concrete node classes (also triggers _register_node_class calls)
-from fabricpc.nodes.linear import LinearNode, LinearExplicitGrad
-from fabricpc.nodes.transformer import TransformerBlockNode
+from fabricpc.nodes.linear import Linear, LinearExplicitGrad
+from fabricpc.nodes.transformer import TransformerBlock
 
 # Convenience aliases matching the target API
-Linear = LinearNode
-TransformerBlock = TransformerBlockNode
+Linear = Linear
+TransformerBlock = TransformerBlock
 
 __all__ = [
     # Base classes and mixins
@@ -31,11 +31,8 @@ __all__ = [
     "NodeBase",
     "FlattenInputMixin",
     # Built-in nodes (full names)
-    "LinearNode",
-    "LinearExplicitGrad",
-    "TransformerBlockNode",
-    # Convenience aliases
     "Linear",
+    "LinearExplicitGrad",
     "TransformerBlock",
     # Internal dispatch helpers
     "_register_node_class",

@@ -100,7 +100,7 @@ def apply_rotary_emb(
     return x_rot
 
 
-class TransformerBlockNode(NodeBase):
+class TransformerBlock(NodeBase):
     """
     Complete Transformer Block with attention and FFN.
 
@@ -250,12 +250,12 @@ class TransformerBlockNode(NodeBase):
         mask = inputs[mask_edge_key] if mask_edge_key else None
 
         # LayerNorm 1
-        x_norm1 = TransformerBlockNode._layernorm(
+        x_norm1 = TransformerBlock._layernorm(
             input_tensor, params.weights["ln1_gamma"], params.biases["ln1_beta"]
         )
 
         # Multi-Head Attention
-        attn_output, substructure_attn = TransformerBlockNode._mha(
+        attn_output, substructure_attn = TransformerBlock._mha(
             x_norm1,
             mask,
             num_heads,
@@ -276,7 +276,7 @@ class TransformerBlockNode(NodeBase):
         x_res1 = input_tensor + attn_output
 
         # LayerNorm 2
-        x_norm2 = TransformerBlockNode._layernorm(
+        x_norm2 = TransformerBlock._layernorm(
             x_res1, params.weights["ln2_gamma"], params.biases["ln2_beta"]
         )
 
@@ -392,4 +392,4 @@ class TransformerBlockNode(NodeBase):
 
 
 # Register node class for dispatch
-_register_node_class(TransformerBlockNode)
+_register_node_class(TransformerBlock)

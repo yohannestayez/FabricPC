@@ -122,7 +122,7 @@ def create_mlp_model(
     Create MLP model with specified width and depth.
 
     Architecture: input -> [hidden x num_layers] -> output
-    Uses LinearNode with sigmoid activations.
+    Uses Linear with sigmoid activations.
 
     Returns:
         (params, structure) tuple

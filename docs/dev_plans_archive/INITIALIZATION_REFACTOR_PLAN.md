@@ -3,6 +3,7 @@
 ## Overview
 
 Refactor FabricPC's initialization system to use registry-based patterns consistent with `EnergyFunctional` and `ActivationBase`. Introduces two new abstraction layers:
+ - DEPRECATED the registry 2/26/2026
 
 1. **Initializer Abstraction** - Context-agnostic tensor initializers (for weights and states)
 2. **State Initialization Abstraction** - Graph-level state initialization strategies

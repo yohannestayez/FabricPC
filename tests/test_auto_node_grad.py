@@ -2,7 +2,7 @@
 Test suite for LinearExplicitGrad gradient computation.
 
 Verifies that LinearExplicitGrad (using JAX autodiff) produces
-numerically equivalent gradients to LinearNode (using manual formulas).
+numerically equivalent gradients to Linear (using manual formulas).
 """
 
 import os
@@ -17,7 +17,7 @@ import jax.numpy as jnp
 from fabricpc.core.types import NodeState, NodeParams, NodeInfo
 from fabricpc.core.inference import run_inference, gather_inputs
 from fabricpc.nodes import (
-    LinearNode,
+    Linear,
     Linear,
     LinearExplicitGrad,
     _get_node_class_from_info,
@@ -70,7 +70,7 @@ def create_graph(node_class, rng_key):
 
 
 class TestLinearAutoGradNode:
-    """Test that LinearExplicitGrad produces identical gradients to LinearNode."""
+    """Test that LinearExplicitGrad produces identical gradients to Linear."""
 
     @pytest.mark.parametrize("activation", ["identity", "relu", "tanh", "sigmoid"])
     def test_forward_inference_equivalence(self, rng_key, activation, grad_tolerance):
@@ -100,11 +100,11 @@ class TestLinearAutoGradNode:
         }
         activation_inst = activation_map[activation]
 
-        # Create NodeInfo for LinearNode
+        # Create NodeInfo for Linear
         node_info = NodeInfo(
             name="dst",
             shape=(output_dim,),
-            node_type="LinearNode",
+            node_type="Linear",
             node_config={"use_bias": True, "flatten_input": False},
             activation=activation_inst,
             energy=GaussianEnergy(),
@@ -145,7 +145,7 @@ class TestLinearAutoGradNode:
         )
 
         # Compare forward_inference results
-        state_linear, grads_linear = LinearNode.forward_inference(
+        state_linear, grads_linear = Linear.forward_inference(
             params, inputs, node_state, node_info, is_clamped=True
         )
         state_autograd, grads_autograd = LinearExplicitGrad.forward_inference(
@@ -197,11 +197,11 @@ class TestLinearAutoGradNode:
         }
         activation_inst = activation_map[activation]
 
-        # Create NodeInfo for LinearNode
+        # Create NodeInfo for Linear
         node_info = NodeInfo(
             name="dst",
             shape=(output_dim,),
-            node_type="LinearNode",
+            node_type="Linear",
             node_config={"use_bias": True, "flatten_input": False},
             activation=activation_inst,
             energy=GaussianEnergy(),
@@ -242,7 +242,7 @@ class TestLinearAutoGradNode:
         )
 
         # Compare forward_learning results
-        state_linear, grads_linear = LinearNode.forward_learning(
+        state_linear, grads_linear = Linear.forward_learning(
             params, inputs, node_state, node_info
         )
         state_autograd, grads_autograd = LinearExplicitGrad.forward_learning(
@@ -351,7 +351,7 @@ class TestLinearAutoGradNode:
             inputs = gather_inputs(node_info, structure_linear, state_linear)
 
             # Compute input gradients using forward_inference
-            _, grads_linear = LinearNode.forward_inference(
+            _, grads_linear = Linear.forward_inference(
                 params_linear.nodes[node_name],
                 inputs,
                 state_linear.nodes[node_name],

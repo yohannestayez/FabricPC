@@ -389,7 +389,7 @@ class TestEnergyDynamics:
 
 
 @pytest.mark.parametrize(
-    "node_type", ["LinearNode"]
+    "node_type", ["Linear"]
 )  # Add more types as they're implemented
 def test_different_node_types(node_type):
     """Test graph construction with different node types."""

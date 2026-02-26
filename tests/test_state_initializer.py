@@ -21,7 +21,7 @@ import jax
 import jax.numpy as jnp
 
 from fabricpc.nodes import Linear
-from fabricpc.nodes.transformer import TransformerBlockNode
+from fabricpc.nodes.transformer import TransformerBlock
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params
 from fabricpc.core.activations import (
@@ -498,7 +498,7 @@ class TestFeedforwardZeroError:
             activation=IdentityActivation(),
             name="mask",
         )
-        transformer_node = TransformerBlockNode(
+        transformer_node = TransformerBlock(
             shape=(seq_len, embed_dim),
             num_heads=2,
             ff_dim=32,

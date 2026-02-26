@@ -57,53 +57,6 @@ class EdgeInfo:
     target: str
     slot: str
 
-    # Config schema for edge configuration (used during graph construction)
-    CONFIG_SCHEMA: Dict[str, Any] = None  # Class attribute, set below
-
-    @classmethod
-    def from_config(cls, edge_config: dict) -> "EdgeInfo":
-        """
-        Construct an EdgeInfo from config.
-
-        Args:
-            edge_config: Edge configuration dictionary
-
-        Returns:
-            Validated EdgeInfo instance
-
-        Raises:
-            ConfigValidationError: If validation fails
-        """
-        from fabricpc.core.config import validate_config, ConfigValidationError
-
-        validated = validate_config(cls.CONFIG_SCHEMA, edge_config, context="edge")
-
-        source = validated["source_name"]
-        target = validated["target_name"]
-        slot = validated["slot"]
-        edge_key = f"{source}->{target}:{slot}"
-
-        if source == target:
-            raise ValueError(f"self-edge at: {source} is not allowed")
-
-        return cls(key=edge_key, source=source, target=target, slot=slot)
-
-
-# Set CONFIG_SCHEMA as a class attribute (can't be done inside frozen dataclass)
-EdgeInfo.CONFIG_SCHEMA = {
-    "source_name": {
-        "type": str,
-        "required": True,
-        "description": "Name of the source node",
-    },
-    "target_name": {
-        "type": str,
-        "required": True,
-        "description": "Name of the target node",
-    },
-    "slot": {"type": str, "default": "in", "description": "Target slot name"},
-}
-
 
 class NodeParams(NamedTuple):
     """Parameters for a single node (weights, biases, etc.)."""

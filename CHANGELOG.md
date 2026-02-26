@@ -15,7 +15,7 @@
 - Aligned gradient computation in multi-GPU training with single-GPU Hebbian learning.
 
 ## [0.2.5] - 2025-12-25
-- Added v1 TransformerBlockNode encapsulating multi-head attention, layer normalization, and feedforward networks using Rotary Position Embeddings (RoPE)
+- Added v1 TransformerBlock encapsulating multi-head attention, layer normalization, and feedforward networks using Rotary Position Embeddings (RoPE)
 - Refactored state initialization: renames "distribution" to "global", adds "node_distribution", and removes fallback configurations.
 - Unifies output metric computation across training modules and returns both energy and cross-entropy for autoregressive training.
 

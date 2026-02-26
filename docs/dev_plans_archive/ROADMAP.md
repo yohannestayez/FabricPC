@@ -35,7 +35,7 @@ This roadmap addresses:
 - [x] Extend `NodeState` to support arbitrary shapes `(batch, *spatial_dims, channels)`
 - [x] Update `NodeInfo` with `shape: Tuple[int, ...]` instead of just `dim: int`
 - [x] Modify inference loop to handle tensor reshaping correctly
-- [x] Update `LinearNode` to flatten inputs for matmul, reshape outputs
+- [x] Update `Linear` to flatten inputs for matmul, reshape outputs
 - [x] Ensure backward compatibility with existing 2D use cases
 - [x] Add comprehensive tests for n-dim shapes
 - [x] Plan for future convolutional node support using channels-last convention
@@ -54,7 +54,7 @@ This roadmap addresses:
 **Goal**: Allow developers to register custom node types without modifying library code.
 
 **Requirements**:
-- [x] Create node registry with decorator-based registration
+- [x] Create node registry with decorator-based registration - DEPRECATED the registry 2/26/2026
 - [x] Support runtime node type discovery
 - [x] Validate custom nodes implement required interface
 - [x] Provide base mixins for common patterns
@@ -104,9 +104,9 @@ class CrossEntropyEnergy(EnergyFunctional):
 
 ### 1.4 Graph construction system
 
-Refactor graph construction with unified registry, config validation, and node-level delegation.
+Refactor graph construction with unified config validation, and node-level delegation.
 
-- [x] Establish a unified registry and schema validation pattern 
+- [x] Establish a unified registry and schema validation pattern - DEPRECATED the registry 2/26/2026
 - [x] Delegate node construction from graph builder to node classes
 - [x] Make all configurable objects (nodes, energy, activations) follow the same extensibility pattern
 - [x] Define schemas at all levels: graph, node, subnode (energy, activation, slots)
@@ -241,7 +241,7 @@ class SoftmaxNode(NodeBase):
         """
         node_out_shape = state.z_latent.shape
 
-        # Sum all inputs (like LinearNode but without weights)
+        # Sum all inputs (like Linear but without weights)
         pre_activation = jnp.zeros(node_out_shape)
         for edge_key, x in inputs.items():
             if edge_key in params.weights:
@@ -493,7 +493,7 @@ class MultiHeadAttentionNode(NodeBase):
 ```python
 # fabricpc/nodes/transformer.py
 @register_node("transformer_block")
-class TransformerBlockNode(NodeBase):
+class TransformerBlock(NodeBase):
     """
     Complete Transformer Block with attention and FFN.
 
@@ -922,7 +922,6 @@ from fabricpc.core.types import (
     NodeParams, NodeState, NodeInfo
 )
 from fabricpc.nodes.base import NodeBase, SlotSpec
-from fabricpc.nodes.registry import register_node
 
 @register_node("hypernode")
 class HyperNode(NodeBase):

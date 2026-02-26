@@ -31,7 +31,7 @@ from fabricpc.core.energy import GaussianEnergy
 from fabricpc.core.initializers import NormalInitializer
 
 
-class LinearNode(FlattenInputMixin, NodeBase):
+class Linear(FlattenInputMixin, NodeBase):
     """
     Linear transformation node: y = activation(W @ x + b)
 
@@ -226,7 +226,7 @@ class LinearNode(FlattenInputMixin, NodeBase):
         return total_energy, state
 
 
-class LinearExplicitGrad(LinearNode):
+class LinearExplicitGrad(Linear):
     """
     Linear node with explicit (non-autodiff) gradient computation.
     Demonstrates overriding NodeBase's autodiff-based gradient computation.
@@ -373,5 +373,5 @@ class LinearExplicitGrad(LinearNode):
 
 
 # Register node classes for dispatch
-_register_node_class(LinearNode)
+_register_node_class(Linear)
 _register_node_class(LinearExplicitGrad)

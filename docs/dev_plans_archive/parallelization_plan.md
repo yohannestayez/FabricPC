@@ -14,7 +14,7 @@ This creates a scaling bottleneck.
 
 1. **vmap over heterogeneous nodes is impossible**
    - `GraphState.nodes` is `Dict[str, NodeState]` where each node has different shapes
-   - Example: `LinearNode(784,)`, `LinearNode(256,)`, `TransformerBlockNode(128, 512)`
+   - Example: `Linear(784,)`, `Linear(256,)`, `TransformerBlock(128, 512)`
    - `jax.vmap` requires homogeneous arrays - cannot vmap over a dict of differently-shaped tensors
    - We can vmap over **groups of homogeneous nodes** (same type and shape), but this requires restructuring.
    - In deep transformer models we can have many identical nodes (e.g., multiple attention blocks) that can be grouped.
