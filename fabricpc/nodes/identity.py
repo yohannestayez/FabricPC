@@ -13,11 +13,12 @@ import jax
 import jax.numpy as jnp
 
 from fabricpc.nodes.base import NodeBase, SlotSpec
-from fabricpc.nodes.registry import register_node
 from fabricpc.core.types import NodeParams, NodeState, NodeInfo
+from fabricpc.core.activations import IdentityActivation
+from fabricpc.core.energy import GaussianEnergy
+from fabricpc.core.initializers import NormalInitializer
 
 
-@register_node("identity")
 class IdentityNode(NodeBase):
     """
     Identity node: passes input through unchanged.
@@ -29,10 +30,33 @@ class IdentityNode(NodeBase):
     - Useful for input nodes or passthrough connections
     """
 
-    CONFIG_SCHEMA: Dict[str, Any] = {}
+    DEFAULT_ACTIVATION = IdentityActivation
+    DEFAULT_ENERGY = GaussianEnergy
+    DEFAULT_LATENT_INIT = NormalInitializer
 
-    DEFAULT_ENERGY_CONFIG: Dict[str, Any] = {"type": "gaussian"}
-    DEFAULT_ACTIVATION_CONFIG: Dict[str, Any] = {"type": "identity"}
+    def __init__(
+        self,
+        shape,
+        name,
+        activation=None,
+        energy=None,
+        latent_init=None,
+    ):
+        """
+        Args:
+            shape: Output shape tuple (excluding batch dimension)
+            name: Node name
+            activation: ActivationBase instance (default: IdentityActivation)
+            energy: EnergyFunctional instance (default: GaussianEnergy)
+            latent_init: InitializerBase instance for latent states
+        """
+        super().__init__(
+            shape=shape,
+            name=name,
+            activation=activation,
+            energy=energy,
+            latent_init=latent_init,
+        )
 
     @staticmethod
     def get_slots() -> Dict[str, SlotSpec]:
@@ -87,19 +111,17 @@ class IdentityNode(NodeBase):
         Returns:
             Tuple of (total_energy, updated NodeState)
         """
-        from fabricpc.nodes import get_node_class
-
-        node_class = get_node_class(node_info.node_type)
-
-
         # Sum all inputs
-            
         z_mu = None
         for edge_key, x in inputs.items():
             if z_mu is None:
                 z_mu = x
             else:
                 z_mu = z_mu + x
+
+        # Handle source nodes with no inputs
+        if z_mu is None:
+            z_mu = state.z_latent
 
         # For identity node, pre_activation equals z_mu (no activation transform)
         pre_activation = z_mu
@@ -115,6 +137,7 @@ class IdentityNode(NodeBase):
         )
 
         # Compute energy using the energy functional
+        node_class = node_info.node_class
         state = node_class.energy_functional(state, node_info)
 
         total_energy = jnp.sum(state.energy)
