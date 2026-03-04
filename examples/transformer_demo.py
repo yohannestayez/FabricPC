@@ -16,7 +16,7 @@ This demo:
 Expected runtime: ~5-20 minutes on a consumer GPU (RTX 3080/4080 class)
 """
 
-use_pcn = False  # Set to True to use predictive coding training, False for backprop
+use_pcn = True  # Set to True to use predictive coding training, False for backprop
 
 import os
 
@@ -32,7 +32,7 @@ import urllib.request
 from typing import Tuple, Iterator, Dict, List, Optional, Any
 from tqdm.auto import tqdm
 
-from fabricpc.nodes import Linear, TransformerBlock
+from fabricpc.nodes import Linear, TransformerBlock, IdentityNode
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params, FeedforwardStateInit
 from fabricpc.core.activations import (
@@ -211,9 +211,7 @@ def create_transformer_model(
     Returns:
         Tuple of (structure, params)
     """
-    input_node = Linear(
-        shape=(seq_len, vocab_size), activation=IdentityActivation(), name="input"
-    )
+    input_node = IdentityNode(shape=(seq_len, vocab_size), name="input")
     embed = Linear(
         shape=(seq_len, embed_dim),
         activation=IdentityActivation(),
@@ -226,6 +224,11 @@ def create_transformer_model(
 
     nodes = [input_node, embed, mask_node]
     edges = [Edge(source=input_node, target=embed.slot("in"))]
+
+    summing_skip_node = IdentityNode(
+        shape=(seq_len, embed_dim), name="summing_skip", scale=(0.1 / (1 + 1))
+    )  # Scale to prevent explosion with multiple skips
+    nodes.append(summing_skip_node)
 
     prev_node = embed
     for i in range(num_blocks):
@@ -240,7 +243,21 @@ def create_transformer_model(
         nodes.append(block)
         edges.append(Edge(source=prev_node, target=block.slot("in")))
         edges.append(Edge(source=mask_node, target=block.slot("mask")))
+
+        block_skip_node = IdentityNode(
+            shape=(seq_len, embed_dim), name=f"block_skip_{i}", scale=(1.0 / num_blocks)
+        )  # Scale to prevent explosion with multiple skips
+        nodes.append(block_skip_node)
+        edges.append(
+            Edge(source=prev_node, target=block_skip_node.slot("in"))
+        )  # Add a redundant skip connection to assist the inference phase in convergence
+        edges.append(
+            Edge(source=block_skip_node, target=summing_skip_node.slot("in"))
+        )  # Add a redundant skip connection to assist the inference phase in convergence
+
         prev_node = block
+
+    edges.append(Edge(source=prev_node, target=summing_skip_node.slot("in")))
 
     output_node = Linear(
         shape=(seq_len, vocab_size),
@@ -250,7 +267,8 @@ def create_transformer_model(
         name="output",
     )
     nodes.append(output_node)
-    edges.append(Edge(source=prev_node, target=output_node.slot("in")))
+    edges.append(Edge(source=summing_skip_node, target=output_node.slot("in")))
+    # edges.append(Edge(source=prev_node, target=output_node.slot("in")))
 
     structure = graph(
         nodes=nodes,
@@ -414,13 +432,13 @@ def main():
     SEQ_LEN = 128        # Sequence length
     EMBED_DIM = 128      # Embedding dimension
     NUM_HEADS = 8       # Attention heads
-    NUM_BLOCKS = 3      # Transformer blocks
+    NUM_BLOCKS = 2      # Transformer blocks
     FF_DIM = 512        # Feedforward hidden dimension
     ROPE_THETA = 500.0    # RoPE frequency
     BATCH_SIZE = 128     # Batch size
     NUM_EPOCHS = 1      # Training epochs
-    INFER_STEPS = 10    # Inference iterations per step
-    ETA_INFER = 0.05    # Inference learning rate
+    INFER_STEPS = 15    # Inference iterations per step
+    ETA_INFER = 0.01    # Inference learning rate
     LR = 1e-3           # Weight learning rate
 
     # fmt: on

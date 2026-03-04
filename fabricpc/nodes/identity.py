@@ -41,6 +41,7 @@ class IdentityNode(NodeBase):
         activation=None,
         energy=None,
         latent_init=None,
+        scale: float = 1.0,  # Optional fixed scaling factor of the node output (default 1.0, no scaling)
     ):
         """
         Args:
@@ -56,6 +57,7 @@ class IdentityNode(NodeBase):
             activation=activation,
             energy=energy,
             latent_init=latent_init,
+            scale=scale,
         )
 
     @staticmethod
@@ -82,7 +84,7 @@ class IdentityNode(NodeBase):
             key: JAX random key (unused)
             node_shape: Output shape of this node (unused)
             input_shapes: Dictionary with edge keys to source shapes (unused)
-            config: Node configuration (unused)
+            config: Node configuration dictionary
 
         Returns:
             NodeParams with empty weights and biases
@@ -119,9 +121,9 @@ class IdentityNode(NodeBase):
             else:
                 z_mu = z_mu + x
 
-        # Handle source nodes with no inputs
-        if z_mu is None:
-            z_mu = state.z_latent
+        z_mu = (
+            z_mu * node_info.node_config["scale"]
+        )  # Apply fixed scaling factor (default is 1.0)
 
         # For identity node, pre_activation equals z_mu (no activation transform)
         pre_activation = z_mu

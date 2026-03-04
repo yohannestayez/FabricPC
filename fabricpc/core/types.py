@@ -161,6 +161,7 @@ class GraphStructure(NamedTuple):
         n_edges = len(self.edges)
         return f"GraphStructure(nodes={n_nodes}, edges={n_edges})"
 
+    # TODO move to a utility and remove duplicated code in graph_builder.py
     @staticmethod
     def _topological_sort(
         nodes: Dict[str, Any], edges: Dict[str, "EdgeInfo"]

@@ -186,7 +186,7 @@ class TransformerBlock(NodeBase):
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
         keys = jax.random.split(key, 8)
-        std = 1.0 / jnp.sqrt(embed_dim)
+        std = 0.02 * 1.0 / jnp.sqrt(embed_dim)
 
         return NodeParams(
             weights={
@@ -199,9 +199,7 @@ class TransformerBlock(NodeBase):
                 "W_ff1": jax.random.normal(keys[4], (embed_dim, ff_dim))
                 * std
                 * jnp.sqrt(ff_dim / embed_dim),
-                "W_ff2": jax.random.normal(keys[5], (ff_dim, embed_dim))
-                * std
-                * jnp.sqrt(ff_dim / embed_dim),
+                "W_ff2": jax.random.normal(keys[5], (ff_dim, embed_dim)) * std,
                 # LayerNorm parameters
                 "ln1_gamma": jnp.ones((1, 1, embed_dim)),
                 "ln2_gamma": jnp.ones((1, 1, embed_dim)),

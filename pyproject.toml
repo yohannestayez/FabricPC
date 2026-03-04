@@ -47,11 +47,17 @@ tfds = [
     "tensorflow-datasets>=4.9.0",
     "tensorflow>=2.15.0",
 ]
+experiments = [
+    "scipy>=1.10.0",
+]
 viz = [
     "plotly>=5.0.0",
     "kaleido>=0.2.1",
     "pandas>=2.0.0",
     "aim>=3.0.0",
+]
+all = [
+    "fabricpc[dev,tfds,experiments,viz]",
 ]
 
 [tool.setuptools.packages.find]

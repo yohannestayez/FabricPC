@@ -1,18 +1,18 @@
 """
-Statistical Comparison: Lateral Connections vs Standard MLP on MNIST
+Statistical Comparison: Graph Cycles vs Standard MLP on MNIST
 =====================================================================
 
 Compares two predictive coding architectures:
-- Lateral: 6-node graph with lateral connections between hidden layers
+- Cyclic: 6-node graph with cycles between hidden layers
 - MLP: 4-node standard feedforward network (baseline)
 
 Both are trained with identical PC hyperparameters to isolate the effect
-of lateral connectivity on classification accuracy.
+of cyclic structure on classification accuracy.
 
 Usage:
-    python examples/mnist_lateral_connections.py                # 10 trials (default)
-    python examples/mnist_lateral_connections.py --n_trials 20  # 20 trials
-    python examples/mnist_lateral_connections.py --verbose       # show per-epoch output
+    python examples/mnist_cyclic_graph.py                # 10 trials (default)
+    python examples/mnist_cyclic_graph.py --n_trials 20  # 20 trials
+    python examples/mnist_cyclic_graph.py --verbose       # show per-epoch output
 """
 
 import os
@@ -42,8 +42,8 @@ jax.config.update("jax_default_prng_impl", "threefry2x32")
 # Training hyperparameters (shared by both arms)
 train_config = {
     "num_epochs": 1,
-    "infer_steps": 20,
-    "eta_infer": 0.05,
+    "infer_steps": 50,
+    "eta_infer": 0.15,
     "optimizer": {"type": "adam", "lr": 0.001, "weight_decay": 0.001},
 }
 batch_size = 200
@@ -51,7 +51,7 @@ batch_size = 200
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Statistical comparison of Lateral vs MLP on MNIST"
+        description="Statistical comparison of cyclic vs MLP on MNIST"
     )
     parser.add_argument(
         "--n_trials",
@@ -70,24 +70,30 @@ def parse_args():
 
 # fmt: off
 def create_lateral_model(rng_key):
-    """Create PC model with lateral connections between hidden layers."""
-    pixels           = IdentityNode(shape=(784,), name="pixels")
+    """Create PC model with cycles between hidden layers."""
+    pixels           = Linear(shape=(784,), activation=SigmoidActivation(), name="pixels")
     hidden1          = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1")
-    hidden1_lateral  = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1_lateral")
+    # hidden1_lateral  = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1_lateral")
     hidden2_lateral  = Linear(shape=(64,),  activation=SigmoidActivation(), name="hidden2_lateral")
     hidden2          = Linear(shape=(64,),  activation=SigmoidActivation(), name="hidden2")
     output           = Linear(shape=(10,),  activation=SoftmaxActivation(), energy=CrossEntropyEnergy(), name="class")
 
     structure = graph(
-        nodes=[pixels, hidden1, hidden1_lateral, hidden2_lateral, hidden2, output],
+        nodes=[pixels, hidden1, hidden2_lateral, hidden2, output],
         edges=[
             Edge(source=pixels,          target=hidden1.slot("in")),
             Edge(source=hidden1,         target=hidden2.slot("in")),
             Edge(source=hidden2,         target=output.slot("in")),
-            Edge(source=pixels,          target=hidden1_lateral.slot("in")),
-            Edge(source=hidden1_lateral, target=hidden1.slot("in")),
-            Edge(source=hidden1_lateral, target=hidden2_lateral.slot("in")),
-            Edge(source=hidden2_lateral, target=hidden2.slot("in")),
+            # Cycle
+            Edge(source=hidden2, target=hidden2_lateral.slot("in")),
+            Edge(source=hidden2_lateral, target=hidden1.slot("in")),
+
+            # # Cycle 1: hidden1
+            # Edge(source=hidden2_lateral, target=hidden1_lateral.slot("in")),
+            # Edge(source=hidden1_lateral, target=hidden1.slot("in")),
+            # # Cycle 2: hidden2
+            # Edge(source=output,          target=hidden2_lateral.slot("in")),
+            # Edge(source=hidden2_lateral, target=hidden2.slot("in")),
         ],
         task_map=TaskMap(x=pixels, y=output),
     )
@@ -96,7 +102,7 @@ def create_lateral_model(rng_key):
 
 
 def create_mlp_model(rng_key):
-    """Create standard MLP (no lateral connections) as baseline."""
+    """Create standard MLP (no cycles) as baseline."""
     pixels   = IdentityNode(shape=(784,), name="pixels")
     hidden1  = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1")
     hidden2  = Linear(shape=(64,),  activation=SigmoidActivation(), name="hidden2")
@@ -120,10 +126,12 @@ def main():
     args = parse_args()
 
     print("=" * 70)
-    print("Statistical Comparison: Lateral Connections vs Standard MLP")
+    print("Statistical Comparison: Cyclic Graph vs Standard MLP")
     print("=" * 70)
     print(f"Dataset: MNIST")
-    print(f"Lateral: 784 -> [256 + 256_lat] -> [64 + 64_lat] -> 10  (6 nodes, 7 edges)")
+    print(
+        f"Cyclic Graph: 784 -> [256 + 256_lat] -> [64 + 64_lat] -> 10  (6 nodes, 7 edges)"
+    )
     print(f"MLP:     784 -> 256 -> 64 -> 10                         (4 nodes, 3 edges)")
     print(f"Training: Predictive Coding (both arms)")
     print(f"Epochs per trial: {train_config['num_epochs']}")
@@ -131,7 +139,7 @@ def main():
     print()
 
     arm_lateral = ExperimentArm(
-        name="Lateral",
+        name="Cyclic Graph",
         model_factory=create_lateral_model,
         train_fn=train_pcn,
         eval_fn=evaluate_pcn,

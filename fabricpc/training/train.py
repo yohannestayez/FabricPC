@@ -6,6 +6,7 @@ as required for true predictive coding with local learning rules.
 """
 
 from typing import Dict, Tuple, Any, cast, List
+import math
 import jax
 import jax.numpy as jnp
 import optax
@@ -179,7 +180,11 @@ def train_pcn(
     # Training hyperparameters
     infer_steps = config.get("infer_steps", 20)
     eta_infer = config.get("eta_infer", 0.1)
-    num_epochs = config.get("num_epochs", 10)
+    num_epochs = config.get("num_epochs", 10)  # supports float (e.g. 1.5)
+
+    # Support fractional epochs: e.g. 1.5 -> 2 loop iterations, last stops at 50%
+    total_epochs = math.ceil(num_epochs)
+    frac = num_epochs - math.floor(num_epochs)
 
     # Create JIT-compiled training step
     jit_train_step = jax.jit(
@@ -191,7 +196,7 @@ def train_pcn(
     # Training loop
     iter_results = []
     epoch_results = []
-    for epoch_idx in range(num_epochs):
+    for epoch_idx in range(total_epochs):
         # Estimate number of batches (if possible)
         try:
             num_batches = len(train_loader)
@@ -199,12 +204,22 @@ def train_pcn(
             # train_loader doesn't support len()
             raise TypeError
 
+        # On the final epoch, truncate if fractional
+        is_last_epoch = epoch_idx == total_epochs - 1
+        if is_last_epoch and frac > 0:
+            max_batches = round(frac * num_batches)
+        else:
+            max_batches = num_batches
+
         # Split rng_key for this epoch's batches
         epoch_rng_key, rng_key = jax.random.split(rng_key)
-        batch_keys = jax.random.split(epoch_rng_key, num_batches)
+        batch_keys = jax.random.split(epoch_rng_key, max_batches)
 
         batch_energies = []
         for batch_idx, batch_data in enumerate(train_loader):
+            if batch_idx >= max_batches:
+                break
+
             # Convert batch to JAX format
             if isinstance(batch_data, (list, tuple)):
                 # Assume (x, y) format
@@ -245,7 +260,7 @@ def train_pcn(
         )
 
         if verbose:
-            print(f"Epoch {epoch_idx + 1}/{num_epochs}, energy: {avg_energy:.4f}")
+            print(f"Epoch {epoch_idx + 1}/{total_epochs}, energy: {avg_energy:.4f}")
 
     return params, iter_results, epoch_results
 

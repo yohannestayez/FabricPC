@@ -28,7 +28,7 @@ os.environ["XLA_FLAGS"] = _xla_flags
 
 import argparse
 import jax
-from fabricpc.nodes import Linear
+from fabricpc.nodes import Linear, IdentityNode
 from fabricpc.builder import Edge, TaskMap, graph
 from fabricpc.graph import initialize_params
 from fabricpc.core.activations import (
@@ -53,7 +53,7 @@ jax.config.update(
 # fmt: off
 
 # Create nodes
-pixels = Linear(shape=(784,), name="pixels")
+pixels = IdentityNode(shape=(784,), name="pixels")
 hidden1 = Linear(shape=(256,), activation=SigmoidActivation(), name="hidden1")
 hidden2 = Linear(shape=(64,), activation=SigmoidActivation(), name="hidden2")
 output = Linear(shape=(10,), activation=SoftmaxActivation(), energy=CrossEntropyEnergy(), name="class")
@@ -66,7 +66,7 @@ structure = graph(
         Edge(source=hidden1, target=hidden2.slot("in")),
         Edge(source=hidden2, target=output.slot("in")),
     ],
-    task_map=TaskMap(x=pixels, y=output),
+    task_map=TaskMap(x=pixels, y=output),  # Tell the trainer which nodes are inputs and targets for supervised learning
 )
 
 # Training hyperparameters

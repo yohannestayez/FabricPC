@@ -12,15 +12,14 @@ Uses JAX for GPU acceleration and local (node-level) automatic differentiation.
 ## About Predictive Coding
 Predictive coding (PC) is a biologically-inspired framework for perception and learning in the brain. It posits that the brain continuously generates predictions about sensory inputs and updates its internal representations based on local prediction errors. 
 PC performs bilevel optimization: an inner loop infers latent activations by minimizing prediction errors, while an outer loop updates weights via local Hebbian-like rules. Under certain conditions, this process is equivalent to backpropagation. While currently slower than backprop on standard hardware, PC offers:
-- Potential for faster inference on specialized hardware
-- Natural handling of recurrent and arbitrary architectures
+- Potential for faster inference on neuromorphic hardware
+- Natural handling of recurrent and arbitrary graph architectures
 - Associative memory capabilities
 - Potential novel plasticity rules for continual learning
 
 There are various flavors of PC. FabricPC provides a graph-based implementation that focuses on principles:
 - Local (Hebbian) learning rules
 - Parallel processing of nodes
-- Expectation-maximization style inference.
 - Modularity of components
 - Arbitrary architectures
 - Scalability with JAX
@@ -31,7 +30,7 @@ There are various flavors of PC. FabricPC provides a graph-based implementation 
 Create a virtual environement with python 3.12.x (higher versions may not work with Aim experiment tracking)
 ```bash
 # Install in editable mode (recommended for development, and running examples)
-pip install -e ".[dev,tfds,viz]"
+pip install -e ".[all]"
 
 # Install pre-commit hooks for code quality
 pre-commit install     

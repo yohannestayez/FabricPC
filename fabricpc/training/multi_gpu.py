@@ -16,6 +16,7 @@ which replicates the computation across devices and averages gradients.
 """
 
 from typing import Dict, Tuple, Any, cast, Iterable
+import math
 import jax
 import jax.numpy as jnp
 import optax
@@ -237,7 +238,11 @@ def train_pcn_multi_gpu(
     # Get training hyperparameters
     infer_steps = config.get("infer_steps", 20)
     eta_infer = config.get("eta_infer", 0.1)
-    num_epochs = config.get("num_epochs", 10)
+    num_epochs = config.get("num_epochs", 10)  # supports float (e.g. 1.5)
+
+    # Support fractional epochs: e.g. 1.5 -> 2 loop iterations, last stops at 50%
+    total_epochs = math.ceil(num_epochs)
+    frac = num_epochs - math.floor(num_epochs)
 
     # Create pmap'ed training step (uses local Hebbian learning like single-GPU)
     pmap_train_step = create_pmap_train_step(
@@ -245,7 +250,7 @@ def train_pcn_multi_gpu(
     )
 
     # Training loop
-    for epoch in range(num_epochs):
+    for epoch in range(total_epochs):
         epoch_energies = []
 
         # Split keys for devices
@@ -259,12 +264,22 @@ def train_pcn_multi_gpu(
         # Estimate number of batches for key splitting
         num_batches = len(train_loader)
 
+        # On the final epoch, truncate if fractional
+        is_last_epoch = epoch == total_epochs - 1
+        if is_last_epoch and frac > 0:
+            max_batches = round(frac * num_batches)
+        else:
+            max_batches = num_batches
+
         # Create keys for all batches (split on each device)
-        batch_keys_per_device = jax.vmap(lambda k: jax.random.split(k, num_batches))(
+        batch_keys_per_device = jax.vmap(lambda k: jax.random.split(k, max_batches))(
             device_keys
         )
 
         for batch_idx, batch_data in enumerate(train_loader):
+            if batch_idx >= max_batches:
+                break
+
             batch_key_for_step = batch_keys_per_device[:, batch_idx]
 
             # Convert batch to JAX format
@@ -303,7 +318,7 @@ def train_pcn_multi_gpu(
         )
 
         if verbose:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Energy: {avg_energy:.4f}")
+            print(f"Epoch {epoch + 1}/{total_epochs}, Energy: {avg_energy:.4f}")
 
     # Extract params from first device (all devices have same params due to pmean)
     params = jax.tree_util.tree_map(lambda x: x[0], params)

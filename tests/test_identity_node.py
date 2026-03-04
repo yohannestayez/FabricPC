@@ -29,14 +29,19 @@ def rng_key():
     return jax.random.PRNGKey(42)
 
 
-def make_node_info(name, node_shape, in_edges):
+def make_node_info(name, node_shape, in_edges, scale=1.0):
     """Helper to create NodeInfo for tests."""
     return NodeInfo(
         name=name,
         shape=node_shape,
         node_type="identity",
         node_class=IdentityNode,
-        node_config={"name": name, "shape": node_shape, "type": "identity"},
+        node_config={
+            "name": name,
+            "shape": node_shape,
+            "type": "identity",
+            "scale": scale,
+        },
         activation=IdentityActivation(),
         energy=GaussianEnergy(),
         latent_init=NormalInitializer(),
@@ -73,9 +78,13 @@ class TestIdentityNode:
         assert len(params.weights) == 0
         assert len(params.biases) == 0
 
-    @pytest.mark.parametrize("num_inputs", [0, 1, 3])
+    @pytest.mark.parametrize("num_inputs", [1, 3])
     def test_output_equals_sum_of_inputs(self, rng_key, num_inputs):
-        """z_mu should equal sum of inputs, or z_latent if no inputs."""
+        """z_mu should equal sum of inputs.
+
+        Note: source nodes (zero inputs) are never forwarded during inference;
+        their state is clamped directly. We only test with >= 1 input.
+        """
         batch_size, node_shape = 4, (10,)
         full_shape = (batch_size,) + node_shape
 
@@ -92,9 +101,6 @@ class TestIdentityNode:
 
         _, new_state = IdentityNode.forward(params, inputs, state, node_info)
 
-        if num_inputs == 0:
-            expected = state.z_latent
-        else:
-            expected = sum(inputs.values())
+        expected = sum(inputs.values())
 
         np.testing.assert_allclose(new_state.z_mu, expected, rtol=1e-5)
