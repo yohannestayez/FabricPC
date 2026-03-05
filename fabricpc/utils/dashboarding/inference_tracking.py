@@ -150,6 +150,9 @@ def run_inference_with_full_history(
     return state, history
 
 
+# TODO create a generic training loop that can optionally collect history on some interval of inference steps. The main difference is in run_inference_with_history() vs run_inference().
+# TODO merge the multi-gpu training loop into the generic loop.
+# TODO remove train loop duplicates in mnist_advanced.p, train.py, multi_gpu.py, train_autoregressive.py, and here inference_tracking.py.
 def train_step_with_history(
     params: GraphParams,
     opt_state: optax.OptState,

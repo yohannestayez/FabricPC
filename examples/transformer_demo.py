@@ -24,6 +24,7 @@ os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("JAX_PLATFORMS", "cuda")
 os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 
+import math
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -42,21 +43,31 @@ from fabricpc.core.activations import (
 )
 from fabricpc.core.energy import CrossEntropyEnergy
 from fabricpc.core.initializers import NormalInitializer, KaimingInitializer
+from fabricpc.training.optimizers import create_optimizer
 from fabricpc.training.train_autoregressive import (
-    train_autoregressive,
+    train_step_autoregressive,
     generate_autoregressive,
     evaluate_autoregressive,
 )
 from fabricpc.training.train_backprop import (
-    train_backprop_autoregressive,
+    train_step_backprop_autoregressive,
     evaluate_backprop_autoregressive,
+)
+from fabricpc.utils.dashboarding import (
+    AimExperimentTracker,
+    TrackingConfig,
+    is_aim_available,
 )
 
 # Reproducibility
 jax.config.update("jax_default_prng_impl", "threefry2x32")
 np.random.seed(42)
 
+# Nodes to track distributions for in Aim
+TRACKED_NODES = ["embed", "transformer_0"]
 
+
+# TODO move to utils dataloader
 # ==============================================================================
 # DATA LOADING: TinyShakespeare
 # ==============================================================================
@@ -441,12 +452,12 @@ def main():
     SEQ_LEN = 128        # Sequence length
     EMBED_DIM = 128      # Embedding dimension
     NUM_HEADS = 8       # Attention heads
-    NUM_BLOCKS = 1      # Transformer blocks
+    NUM_BLOCKS = 2      # Transformer blocks
     FF_DIM = 512        # Feedforward hidden dimension
     ROPE_THETA = 500.0    # RoPE frequency
     BATCH_SIZE = 128     # Batch size
-    NUM_EPOCHS = 1      # Training epochs
-    INFER_STEPS = 11    # Inference iterations per step
+    NUM_EPOCHS = 0.1      # Training epochs
+    INFER_STEPS = 10    # Inference iterations per step
     ETA_INFER = 0.01    # Inference learning rate
     LR = 1e-3           # Weight learning rate
 
@@ -503,6 +514,47 @@ def main():
     total_params = sum(p.size for p in jax.tree_util.tree_leaves(params))
     print(f"Model created: {len(structure.nodes)} nodes, {len(structure.edges)} edges")
     print(f"Total parameters: {total_params:,}")
+
+    # ==============================================================================
+    # AIM EXPERIMENT TRACKING SETUP
+    # ==============================================================================
+    if is_aim_available():
+        tracking_config = TrackingConfig(
+            experiment_name="transformer_pc_shakespeare",
+            run_name=f"{'PC' if use_pcn else 'BP'}_{NUM_BLOCKS}blk_{EMBED_DIM}d",
+            track_batch_energy=True,
+            track_batch_energy_per_node=False,
+            track_weight_distributions=True,
+            track_latent_distributions=True,
+            track_activation_distributions=True,
+            weight_distribution_every_n_epochs=1,
+            latent_distribution_every_n_batches=50,
+        )
+        tracker = AimExperimentTracker(config=tracking_config)
+        tracker.log_hyperparams(
+            {
+                "model_config": {
+                    "seq_len": SEQ_LEN,
+                    "embed_dim": EMBED_DIM,
+                    "num_heads": NUM_HEADS,
+                    "num_blocks": NUM_BLOCKS,
+                    "ff_dim": FF_DIM,
+                    "rope_theta": ROPE_THETA,
+                    "total_params": total_params,
+                },
+                "training_method": "PC" if use_pcn else "Backprop",
+                "batch_size": BATCH_SIZE,
+                "num_epochs": NUM_EPOCHS,
+                "infer_steps": INFER_STEPS,
+                "eta_infer": ETA_INFER,
+                "lr": LR,
+            }
+        )
+        tracker.log_graph_structure(structure)
+        print("\nAim tracking enabled. Run 'aim up' after training to view dashboard.")
+    else:
+        tracker = None
+        print("\nAim not installed. Tracking disabled. Install with: pip install aim")
 
     # Training config for autoregressive training
     train_config = {
@@ -597,41 +649,110 @@ def main():
 
     start_time = time.time()
 
-    ### Choose one of the training methods below
+    # ==============================================================================
+    # CUSTOM TRAINING LOOP (for Aim per-batch latent distribution tracking)
+    # ==============================================================================
+    optimizer = create_optimizer(train_config["optimizer"])
+    opt_state = optimizer.init(params)
+
+    num_epochs = train_config["num_epochs"]
+    total_epochs = math.ceil(num_epochs)
+    frac = num_epochs - math.floor(num_epochs)
+    use_causal_mask = train_config.get("use_causal_mask", True)
+
+    # JIT compile the appropriate train step
+    if use_pcn:
+        jit_train_step = jax.jit(
+            lambda p, o, b, k: train_step_autoregressive(
+                p,
+                o,
+                b,
+                structure,
+                optimizer,
+                k,
+                INFER_STEPS,
+                ETA_INFER,
+                use_causal_mask,
+            )
+        )
+    else:
+        jit_train_step = jax.jit(
+            lambda p, o, b, k: train_step_backprop_autoregressive(
+                p, o, b, structure, optimizer, k, use_causal_mask
+            )
+        )
+
+    energy_history = []
+    eval_results = []
+
     try:
-        if use_pcn:
-            # Train with predictive coding (autoregressive)
-            trained_params, energy_history, eval_results = train_autoregressive(
-                params=params,
-                structure=structure,
-                train_loader=train_loader,
-                config=train_config,
-                rng_key=train_key,
-                verbose=True,
-                epoch_callback=eval_callback,
-                iter_callback=iter_callback,
+        for epoch in range(total_epochs):
+            num_batches = len(train_loader)
+            is_last = epoch == total_epochs - 1
+            max_batches = (
+                round(frac * num_batches) if (is_last and frac > 0) else num_batches
             )
-        else:
-            # Backprop (autoregressive)
-            trained_params, energy_history, eval_results = (
-                train_backprop_autoregressive(
-                    params,
-                    structure,
-                    train_loader,
-                    {
-                        "num_epochs": NUM_EPOCHS,
-                        "optimizer": {"type": "adam", "lr": 1e-3},
-                        "use_causal_mask": True,
-                    },
-                    train_key,
-                    verbose=True,
-                    epoch_callback=eval_callback,
-                    iter_callback=iter_callback,
+
+            epoch_rng, train_key = jax.random.split(train_key)
+            batch_keys = jax.random.split(epoch_rng, max_batches)
+
+            batch_energies = []
+            for batch_idx, batch_data in enumerate(train_loader):
+                if batch_idx >= max_batches:
+                    break
+
+                batch = {k: jnp.array(v) for k, v in batch_data.items()}
+
+                if use_pcn:
+                    params, opt_state, energy, ce_loss, final_state = jit_train_step(
+                        params, opt_state, batch, batch_keys[batch_idx]
+                    )
+                    loss_val = float(energy)
+                else:
+                    params, opt_state, loss, _predictions = jit_train_step(
+                        params, opt_state, batch, batch_keys[batch_idx]
+                    )
+                    loss_val = float(loss)
+                    final_state = None
+
+                # Progress bar update
+                iter_callback(epoch, batch_idx, loss_val)
+                batch_energies.append(loss_val)
+
+                # --- Aim per-batch tracking ---
+                if tracker is not None:
+                    tracker.track_batch_energy(loss_val, epoch=epoch, batch=batch_idx)
+                    # Latent distributions (PC only — BP doesn't return GraphState)
+                    if final_state is not None:
+                        tracker.track_latent_distributions(
+                            final_state,
+                            epoch=epoch,
+                            batch=batch_idx,
+                            nodes=TRACKED_NODES,
+                        )
+
+            energy_history.append(batch_energies)
+
+            # --- Aim per-epoch tracking ---
+            if tracker is not None:
+                tracker.track_weight_distributions(
+                    params, structure, epoch=epoch, nodes=TRACKED_NODES
                 )
+
+            # Eval callback
+            eval_results.append(
+                eval_callback(epoch, params, structure, train_config, train_key)
             )
+
+            if batch_energies:
+                avg_loss = sum(batch_energies) / len(batch_energies)
+                tqdm.write(
+                    f"  Train Epoch {epoch + 1}/{total_epochs}, Avg loss: {avg_loss:.4f}"
+                )
     finally:
         progress_bar.close()
 
+    trained_params = params
     train_time = time.time() - start_time
 
     print(
@@ -668,6 +789,17 @@ def main():
         print("-" * 40)
         print(generated)
         print("-" * 40)
+
+    # Close Aim tracker
+    if tracker is not None:
+        tracker.close()
+        print("\n[Aim Tracking Complete]")
+        print("  Run 'aim up' to view the dashboard")
+        print(f"  Tracked nodes: {TRACKED_NODES}")
+        print(f"  Weight distributions: per epoch (all weight keys per node)")
+        print(
+            f"  Latent distributions: every {tracker.config.latent_distribution_every_n_batches} batches"
+        )
 
     # Summary
     print("\n[5/5] Summary")
