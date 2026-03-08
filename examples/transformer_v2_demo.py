@@ -19,8 +19,11 @@ import jax
 import jax.numpy as jnp
 import torch
 from torch.utils.data import DataLoader, Dataset
-from fabricpc.graph import create_pc_graph
-from fabricpc.training.multi_gpu import train_pcn_multi_gpu, evaluate_pcn_multi_gpu
+from fabricpc.graph import initialize_params
+from fabricpc.training.multi_gpu import (
+    train_pcn_multi_gpu,
+    evaluate_transformer_multi_gpu,
+)
 from fabricpc.core.inference import run_inference
 from fabricpc.graph.state_initializer import initialize_graph_state
 from fabricpc.nodes.transformer_v2 import create_deep_transformer
@@ -32,9 +35,8 @@ from fabricpc.nodes.transformer_v2 import create_deep_transformer
 def load_data(path="data/tiny_shakespeare.txt"):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Dataset file not found: {path}")
-    else:
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
 
     chars = sorted(list(set(text)))
     vocab_size = len(chars)
@@ -53,7 +55,6 @@ def split_data(data, train_frac=0.8, val_frac=0.1):
     train_data = data[:n_train]
     val_data = data[n_train : n_train + n_val]
     test_data = data[n_train + n_val :]
-
     return train_data, val_data, test_data
 
 
@@ -78,7 +79,6 @@ class TextDataset(Dataset):
 # ----------------------------------------------------------------------
 seq_len = 32
 
-# Scale batch size by device count
 n_devices = jax.device_count()
 base_batch_size = 32
 batch_size = base_batch_size * n_devices
@@ -94,41 +94,48 @@ test_dataset = TextDataset(test_data, seq_len, vocab_size)
 train_loader = DataLoader(
     train_dataset, batch_size=batch_size, shuffle=True, drop_last=True
 )
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+val_loader = DataLoader(
+    val_dataset, batch_size=batch_size, shuffle=False, drop_last=True
+)
+test_loader = DataLoader(
+    test_dataset, batch_size=batch_size, shuffle=False, drop_last=True
+)
 
 # ----------------------------------------------------------------------
 # MODEL ARCHITECTURE
 # ----------------------------------------------------------------------
-config = create_deep_transformer(
-    depth=1,
+structure = create_deep_transformer(
+    depth=4,
     embed_dim=64,
     num_heads=4,
     mlp_dim=128,
     seq_len=seq_len,
     vocab_size=vocab_size,
-    weight_init={"type": "normal", "std": 0.02},
+    weight_init={"type": "normal", "std": 0.04402197307582635},
 )
 
 # ----------------------------------------------------------------------
-# CREATE PC GRAPH & TRAIN
+# INIT PARAMS & TRAIN
 # ----------------------------------------------------------------------
 master_rng_key = jax.random.PRNGKey(42)
 graph_key, train_key, eval_key = jax.random.split(master_rng_key, 3)
-params, structure = create_pc_graph(config, graph_key)
+
+params = initialize_params(structure, graph_key)
 
 train_config = {
     "num_epochs": 5,
-    "infer_steps": 20,
-    "eta_infer": 0.01,
-    "optimizer": {"type": "adam", "lr": 1e-4},
+    "infer_steps": 17,
+    "eta_infer": 0.033195052120243505,
+    "optimizer": {"type": "adam", "lr": 1e-5},
 }
 
 print(f"Vocab Size: {vocab_size} | Training on local tiny_shakespeare.txt...")
 trained_params = train_pcn_multi_gpu(
     params, structure, train_loader, train_config, train_key, verbose=True
 )
-metrics = evaluate_pcn_multi_gpu(
+
+# Evaluate
+metrics = evaluate_transformer_multi_gpu(
     trained_params, structure, test_loader, train_config, eval_key
 )
 
@@ -159,12 +166,10 @@ def generate(
         inputs = {"input_ids": input_batch}
         batch_size = input_batch.shape[0]
 
-        # Initialize state
         state = initialize_graph_state(
             structure, batch_size, gen_key, clamps=inputs, params=trained_params
         )
 
-        # Run PC inference
         final_state = run_inference(
             trained_params,
             state,
@@ -177,7 +182,6 @@ def generate(
         logits_node_state = final_state.nodes["logits"]
         last_step_logits = logits_node_state.z_latent[0, -1, :]
 
-        # Temperature Sampling
         gen_key, sample_key = jax.random.split(gen_key)
         scaled_logits = last_step_logits / temperature
         next_idx = int(jax.random.categorical(sample_key, scaled_logits))

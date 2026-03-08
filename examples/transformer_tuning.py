@@ -9,13 +9,12 @@ import torch
 import optuna
 import random
 from torch.utils.data import DataLoader, Dataset
-from fabricpc.graph import create_pc_graph
+from fabricpc.graph import initialize_params
 from fabricpc.nodes.transformer_v2 import create_deep_transformer
 from fabricpc.training.multi_gpu import (
     train_pcn_multi_gpu,
     evaluate_transformer_multi_gpu,
 )
-
 from fabricpc.tuning.bayesian_tuner import BayesianTuner
 
 
@@ -87,7 +86,8 @@ def trial_model(config, rng_key):
             f"embed_dim={embed_dim} not divisible by num_heads={num_heads}"
         )
 
-    transformer_config = create_deep_transformer(
+    # Create the structure directly
+    structure = create_deep_transformer(
         depth=depth,
         embed_dim=embed_dim,
         num_heads=num_heads,
@@ -97,8 +97,9 @@ def trial_model(config, rng_key):
         weight_init=weight_init,
     )
 
-    # Multi-GPU training expects: params, structure
-    params, structure = create_pc_graph(transformer_config, rng_key)
+    # Initialize params using the structure
+    params = initialize_params(structure, rng_key)
+
     return params, structure
 
 
@@ -209,7 +210,7 @@ if __name__ == "__main__":
     )
 
     print("\n=== Starting Multi-GPU Hyperparameter Search ===")
-    study = tuner.tune(n_trials=10, search_space=search_space_transformer)
+    study = tuner.tune(n_trials=30, search_space=search_space_transformer)
 
     print("\nBest params:")
     print(study.best_params)

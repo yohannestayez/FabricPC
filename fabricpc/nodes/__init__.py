@@ -19,7 +19,6 @@ from fabricpc.nodes.transformer import TransformerBlock
 from fabricpc.nodes.identity import IdentityNode
 from fabricpc.nodes.transformer_v2 import (
     EmbeddingNode,
-    TransformerBlockNode,
     MhaResidualNode,
     LnMlp1Node,
     Mlp2ResidualNode,
@@ -42,7 +41,6 @@ __all__ = [
     "TransformerBlock",
     "IdentityNode",
     "EmbeddingNode",
-    "TransformerBlockNode",
     "MhaResidualNode",
     "LnMlp1Node",
     "Mlp2ResidualNode",

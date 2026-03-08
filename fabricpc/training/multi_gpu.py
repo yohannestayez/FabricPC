@@ -336,18 +336,23 @@ def evaluate_transformer_multi_gpu(
 
     infer_steps = config.get("infer_steps", 20)
     eta_infer = config.get("eta_infer", 0.1)
-    state_init_config = structure.config["graph_state_initializer"]
 
     # Handle loader length safely
     try:
         num_batches = len(test_loader)
     except TypeError:
-        num_batches = 1000 # Fallback
-    
-    batch_keys_per_device = jax.vmap(lambda k: jax.random.split(k, num_batches))(device_keys)
+        num_batches = 1000  # Fallback
+
+    batch_keys_per_device = jax.vmap(lambda k: jax.random.split(k, num_batches))(
+        device_keys
+    )
 
     # pmap'ed inference function
-    def inference_fn(params_obj: GraphParams, sharded_batch: Dict[str, jnp.ndarray], randgen_key: jax.Array):
+    def inference_fn(
+        params_obj: GraphParams,
+        sharded_batch: Dict[str, jnp.ndarray],
+        randgen_key: jax.Array,
+    ):
         batch_size_ = next(iter(sharded_batch.values())).shape[0]
         clamps = {}
         for task_name, task_value in sharded_batch.items():
@@ -356,10 +361,12 @@ def evaluate_transformer_multi_gpu(
                 clamps[node_name] = task_value
 
         state = initialize_graph_state(
-            structure, batch_size_, randgen_key, clamps=clamps,
-            state_init_config=state_init_config, params=params_obj,
+            structure, batch_size_, randgen_key, clamps=clamps, params=params_obj
         )
-        final_state = run_inference(params_obj, state, clamps, structure, infer_steps, eta_infer)
+
+        final_state = run_inference(
+            params_obj, state, clamps, structure, infer_steps, eta_infer
+        )
         return final_state
 
     pmap_inference = jax.pmap(inference_fn, axis_name="devices")
@@ -389,29 +396,29 @@ def evaluate_transformer_multi_gpu(
 
         # Run inference on all GPUs
         final_states = pmap_inference(params, batch_sharded, batch_key_for_step)
-        
+
         # Calculate energy per device (internal + external/output error)
         def get_device_energy(fs, batch_y):
             e = 0.0
             # Internal energy
             for node_name in structure.nodes:
-                if structure.nodes[node_name].in_degree > 0:
+                if structure.nodes[node_name].node_info.in_degree > 0:
                     e += jnp.sum(fs.nodes[node_name].energy)
-            
+
             # External energy (Output prediction error)
             if "y" in structure.task_map:
                 y_node = structure.task_map["y"]
                 pred = fs.nodes[y_node].z_latent
-                
+
                 # Handle shapes: batch_y might be indices or one-hot
                 if batch_y.ndim == pred.ndim:
                     error = pred - batch_y
-                    e += jnp.sum(error ** 2)
+                    e += jnp.sum(error**2)
                 elif batch_y.ndim == pred.ndim - 1:
                     tgt_oh = jax.nn.one_hot(batch_y, pred.shape[-1])
                     error = pred - tgt_oh
-                    e += jnp.sum(error ** 2)
-            
+                    e += jnp.sum(error**2)
+
             return e
 
         device_energies = jax.vmap(get_device_energy)(final_states, batch_sharded["y"])
@@ -422,33 +429,39 @@ def evaluate_transformer_multi_gpu(
             y_node = structure.task_map["y"]
             # z_latent: (n_devices, device_batch, seq_len, vocab_size)
             preds = final_states.nodes[y_node].z_latent
-            
+
             # Reshape to (total_batch, ...)
             preds_flat = preds.reshape(batch_size, *preds.shape[2:])
             targets = batch["y"]
 
             # --- Accuracy ---
             pred_labels = jnp.argmax(preds_flat, axis=-1)
-            
+
             if targets.ndim == preds_flat.ndim:
-                 # One-hot targets
+                # One-hot targets
                 true_labels = jnp.argmax(targets, axis=-1)
             else:
-                 # Integer targets
+                # Integer targets
                 true_labels = targets
-                
+
             total_correct += int(jnp.sum(pred_labels == true_labels))
 
             # Stable CE computation
             softmax_preds = jax.nn.softmax(preds_flat, axis=-1)
-            
+
             if targets.ndim == preds_flat.ndim:
                 # One-hot
-                batch_ce = -jnp.sum(targets * jnp.log(jnp.clip(softmax_preds, 1e-10, 1.0)))
-                target_tokens = targets.shape[0] * (targets.shape[1] if targets.ndim > 1 else 1)
+                batch_ce = -jnp.sum(
+                    targets * jnp.log(jnp.clip(softmax_preds, 1e-10, 1.0))
+                )
+                target_tokens = targets.shape[0] * (
+                    targets.shape[1] if targets.ndim > 1 else 1
+                )
             else:
                 targets_one_hot = jax.nn.one_hot(targets, preds_flat.shape[-1])
-                batch_ce = -jnp.sum(targets_one_hot * jnp.log(jnp.clip(softmax_preds, 1e-10, 1.0)))
+                batch_ce = -jnp.sum(
+                    targets_one_hot * jnp.log(jnp.clip(softmax_preds, 1e-10, 1.0))
+                )
                 target_tokens = targets.size
 
             total_ce += float(batch_ce)
@@ -463,7 +476,7 @@ def evaluate_transformer_multi_gpu(
         "accuracy": accuracy,
         "cross_entropy": mean_ce,
         "perplexity": perplexity,
-        "energy": avg_energy, 
+        "energy": avg_energy,
     }
 
 
@@ -524,13 +537,6 @@ def evaluate_pcn_multi_gpu(
                 node_name = structure.task_map[task_name]
                 clamps[node_name] = task_value
 
-        state = initialize_graph_state(
-            structure,
-            batch_size_,
-            randgen_key,
-            clamps=clamps,
-            params=params_obj,
-        )
         final_state = run_inference(
             params_obj, state, clamps, structure, infer_steps, eta_infer
         )
