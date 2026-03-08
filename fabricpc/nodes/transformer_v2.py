@@ -320,3 +320,56 @@ class LnMlp1Node(NodeBase):
         )
         state = LnMlp1Node.energy_functional(state, node_info)
         return jnp.sum(state.energy), state
+
+
+# ==============================================================================
+# MLP2 + RESIDUAL NODE
+# ==============================================================================
+
+
+@register_node("mlp2_residual")
+class Mlp2ResidualNode(NodeBase):
+    """
+    Implements: residual_input + (mlp1_output * W2 + b2)
+    """
+
+    CONFIG_SCHEMA = {
+        "embed_dim": {"type": int, "required": True},
+        "ff_dim": {"type": int, "required": True},
+        "weight_init": {"type": dict, "default": {"type": "xavier"}},
+    }
+    DEFAULT_ENERGY_CONFIG = {"type": "gaussian"}
+
+    @staticmethod
+    def get_slots():
+        return {"in": SlotSpec("in", False), "residual": SlotSpec("residual", False)}
+
+    @staticmethod
+    def initialize_params(key, node_shape, input_shapes, config):
+        embed_dim, ff_dim = config["embed_dim"], config["ff_dim"]
+
+        # Use config provided weight_init
+        weight_init = config.get("weight_init", {"type": "xavier"})
+
+        weights = {"W_ff2": initialize(key, (ff_dim, embed_dim), weight_init)}
+        biases = {"b_ff2": jnp.zeros((embed_dim,))}
+        return NodeParams(weights, biases)
+
+    @staticmethod
+    def forward(params, inputs, state, node_info):
+        # Identify inputs
+        mlp1_in = next(val for key, val in inputs.items() if key.endswith(":in"))
+        res_in = next(val for key, val in inputs.items() if key.endswith(":residual"))
+
+        # Linear 2
+        mlp2 = jnp.dot(mlp1_in, params.weights["W_ff2"]) + params.biases["b_ff2"]
+
+        # Residual
+        z_mu = res_in + mlp2
+
+        error = state.z_latent - z_mu
+        state = state._replace(
+            z_mu=z_mu, error=error, substructure={"gain_mod_error": error}
+        )
+        state = Mlp2ResidualNode.energy_functional(state, node_info)
+        return jnp.sum(state.energy), state
