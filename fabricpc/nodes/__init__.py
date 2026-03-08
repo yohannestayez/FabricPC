@@ -21,6 +21,7 @@ from fabricpc.nodes.transformer_v2 import (
     EmbeddingNode,
     TransformerBlockNode,
     MhaResidualNode,
+    LnMlp1Node,
 )
 
 # Convenience aliases matching the target API
@@ -41,4 +42,5 @@ __all__ = [
     "EmbeddingNode",
     "TransformerBlockNode",
     "MhaResidualNode",
+    "LnMlp1Node",
 ]

@@ -252,3 +252,71 @@ class MhaResidualNode(NodeBase):
         state = state._replace(z_mu=z_mu, error=error, substructure=substructure)
         state = MhaResidualNode.energy_functional(state, node_info)
         return jnp.sum(state.energy), state
+
+
+# ==============================================================================
+# LAYERNORM + MLP1 NODE
+# ==============================================================================
+
+
+@register_node("ln_mlp1")
+class LnMlp1Node(NodeBase):
+    """
+    Implements: Activation(LayerNorm(x) * W1 + b1)
+    """
+
+    CONFIG_SCHEMA = {
+        "embed_dim": {"type": int, "required": True},
+        "ff_dim": {"type": int, "required": True},
+        "activation": {"type": str, "default": "gelu"},
+        "weight_init": {"type": dict, "default": {"type": "kaiming"}},
+    }
+    DEFAULT_ENERGY_CONFIG = {"type": "gaussian"}
+
+    @staticmethod
+    def get_slots():
+        return {"in": SlotSpec("in", False)}
+
+    @staticmethod
+    def initialize_params(key, node_shape, input_shapes, config):
+        embed_dim, ff_dim = config["embed_dim"], config["ff_dim"]
+        keys = jax.random.split(key, 2)
+
+        # Use config provided weight_init
+        weight_init = config.get("weight_init", {"type": "kaiming"})
+
+        weights = {
+            "ln_gamma": jnp.ones((embed_dim,)),
+            "W_ff1": initialize(keys[0], (embed_dim, ff_dim), weight_init),
+        }
+        biases = {
+            "ln_beta": jnp.zeros((embed_dim,)),
+            "b_ff1": jnp.zeros((ff_dim,)),
+        }
+        return NodeParams(weights, biases)
+
+    @staticmethod
+    def forward(params, inputs, state, node_info):
+        x = inputs[list(inputs.keys())[0]]
+        x_norm = layernorm(x, params.weights["ln_gamma"], params.biases["ln_beta"])
+
+        # Linear 1
+        h = jnp.dot(x_norm, params.weights["W_ff1"]) + params.biases["b_ff1"]
+
+        # Activation
+        act_fn, activation_deriv = get_activation(node_info.node_config["activation"])
+        z_mu = act_fn(h)
+
+        error = state.z_latent - z_mu
+
+        # Compute gain modulation (activations usually require f'(h) * error)
+        # Note: In standard PC, this is usually done during back-propagation of gradients,
+        # but storing it here helps explicit gradient calculation.
+        f_prime = activation_deriv(h)
+        gain_mod_error = error * f_prime
+
+        state = state._replace(
+            z_mu=z_mu, error=error, substructure={"gain_mod_error": gain_mod_error}
+        )
+        state = LnMlp1Node.energy_functional(state, node_info)
+        return jnp.sum(state.energy), state
