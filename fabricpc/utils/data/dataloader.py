@@ -19,6 +19,8 @@ class MnistLoader:
               shuffling across runs and machines. If None, shuffling is random.
         normalize_mean: Mean for normalization (default: MNIST mean).
         normalize_std: Std for normalization (default: MNIST std).
+        dataset_name: tfds dataset identifier. Defaults to ``"mnist:3.0.1"``.
+            Use ``"kmnist"`` for Kuzushiji-MNIST (same shape, 10 classes).
     """
 
     def __init__(
@@ -30,6 +32,7 @@ class MnistLoader:
         tensor_format: str = "NHWC",  # image tensor 'flat' or 'NHWC' batch-height-width-channels
         normalize_mean: float = 0.1307,
         normalize_std: float = 0.3081,
+        dataset_name: str = "mnist:3.0.1",
     ):
         import tensorflow_datasets as tfds
         import tensorflow as tf
@@ -53,9 +56,9 @@ class MnistLoader:
             interleave_cycle_length=1,  # Sequential reading for determinism
         )
 
-        # Load dataset with pinned version for cross-machine reproducibility
+        # Load dataset (pinned version when provided, e.g. "mnist:3.0.1")
         ds, info = tfds.load(
-            "mnist:3.0.1",
+            dataset_name,
             split=split,
             with_info=True,
             as_supervised=True,
@@ -88,6 +91,86 @@ class MnistLoader:
             # One-hot encode labels
             labels = one_hot(labels.numpy(), num_classes=10)
 
+            yield images, labels
+
+    def __len__(self):
+        return self._num_batches
+
+
+class KmnistLoader:
+    """JAX-compatible KMNIST loader using Hugging Face ``datasets``.
+
+    Downloads KMNIST from ``tanganke/kmnist`` on Hugging Face Hub,
+    caches it locally, and provides the same interface as MnistLoader.
+    No tfds dependency required — install with ``pip install datasets``.
+
+    Args:
+        split: 'train' or 'test'.
+        batch_size: Number of samples per batch.
+        shuffle: Whether to shuffle the data each epoch.
+        seed: Random seed for reproducibility.
+        tensor_format: 'flat' for (B, 784) or 'NHWC' for (B, 28, 28, 1).
+        normalize_mean: Mean for normalization (default: KMNIST mean).
+        normalize_std: Std for normalization (default: KMNIST std).
+    """
+
+    def __init__(
+        self,
+        split: str,
+        batch_size: int,
+        shuffle: bool = True,
+        seed: int = None,
+        tensor_format: str = "NHWC",
+        normalize_mean: float = 0.1917,
+        normalize_std: float = 0.3483,
+    ):
+        from datasets import load_dataset
+
+        if split not in ("train", "test"):
+            raise ValueError(f"split must be 'train' or 'test', got '{split}'")
+
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.seed = seed
+        self.tensor_format = tensor_format
+        self.normalize_mean = normalize_mean
+        self.normalize_std = normalize_std
+        self._epoch = 0
+
+        # Load from Hugging Face (cached after first download)
+        ds = load_dataset("tanganke/kmnist", split=split)
+
+        # Extract images and labels as numpy arrays
+        images = np.array(ds["image"])  # (N, 28, 28) PIL or uint8
+        labels = np.array(ds["label"], dtype=np.uint8)  # (N,)
+
+        # Ensure (N, 28, 28, 1) shape
+        if images.ndim == 3:
+            images = images[..., np.newaxis]
+
+        # Normalize
+        self.images = (images.astype(np.float32) / 255.0 - normalize_mean) / normalize_std
+        self.labels = labels
+
+        self.num_examples = len(self.images)
+        self._num_batches = (self.num_examples + batch_size - 1) // batch_size
+
+    def __iter__(self):
+        indices = np.arange(self.num_examples)
+        if self.shuffle:
+            epoch_seed = self.seed + self._epoch if self.seed is not None else None
+            rng = np.random.default_rng(epoch_seed)
+            rng.shuffle(indices)
+        self._epoch += 1
+
+        for start in range(0, self.num_examples, self.batch_size):
+            batch_idx = indices[start: start + self.batch_size]
+            images = self.images[batch_idx]
+
+            if self.tensor_format == "flat":
+                images = images.reshape(images.shape[0], -1)
+
+            labels = one_hot(self.labels[batch_idx], num_classes=10)
             yield images, labels
 
     def __len__(self):
