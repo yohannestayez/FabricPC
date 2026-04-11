@@ -55,6 +55,7 @@ logs/
 log_dir/
 outputs/
 runs/
+plots/
 
 # Aim experiment data logger
 .aim/
