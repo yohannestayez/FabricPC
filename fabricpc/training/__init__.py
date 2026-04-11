@@ -27,6 +27,13 @@ from fabricpc.training.train_backprop import (
     evaluate_backprop,
     evaluate_backprop_autoregressive,
 )
+from fabricpc.training.train_ipc import train_step_ipc, train_pcn_ipc
+from fabricpc.training.carryover import (
+    proximal_carryover_euclidean,
+    proximal_carryover_fisher,
+    update_anchor,
+    update_anchor_in_chain,
+)
 
 __all__ = [
     # Predictive coding training
@@ -53,4 +60,12 @@ __all__ = [
     "train_step_backprop_autoregressive",
     "train_backprop_autoregressive",
     "evaluate_backprop_autoregressive",
+    # Incremental PC training
+    "train_step_ipc",
+    "train_pcn_ipc",
+    # Carryover transforms
+    "proximal_carryover_euclidean",
+    "proximal_carryover_fisher",
+    "update_anchor",
+    "update_anchor_in_chain",
 ]
